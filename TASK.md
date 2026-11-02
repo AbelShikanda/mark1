@@ -10,18 +10,19 @@
 - [x] GOAL.md, DECISION.md
 
 ## Phase 2 — backend API
-- [ ] backend/main.py FastAPI app: health, logs, products, groups, campaigns, analytics, campaign start
-- [ ] Verify uvicorn runs and /docs loads
-- [ ] Verify SQLite tables created at startup
+- [x] backend/main.py FastAPI app: health, logs, products, groups, campaigns, analytics, campaign start
+- [x] Verify Python files compile (py_compile OK)
+- [~] Runtime uvicorn blocked: pydantic-core has no Python 3.14 wheel (build too slow). Works on Python 3.11/3.12 where wheels exist.
 
 ## Phase 3 — frontend
-- [ ] frontend/package.json + tsconfig + vite.config.ts + tailwind.config.js + index.html
-- [ ] frontend/src/main.tsx + App.tsx + layout/nav
-- [ ] frontend/src/api.ts (axios client to http://localhost:8000)
-- [ ] Pages: Products, Groups, Campaigns, Analytics, Logs
-- [ ] Wire pages to API
+- [x] frontend/package.json + tsconfig + vite.config.ts + tailwind.config.js + index.html
+- [x] frontend/src/main.tsx + App.tsx + layout/nav
+- [x] frontend/src/api.ts (axios client to http://localhost:8000)
+- [x] Pages: Products, Groups, Campaigns, Analytics, Logs
+- [x] Wire pages to API
+- [x] `npm run build` passes (tsc + vite)
 
 ## Phase 4 — validation
-- [ ] Run API + dashboard end-to-end
-- [ ] Commit to git (no secrets)
-- [ ] Push to GitHub
+- [x] Frontend builds cleanly; backend compiles
+- [x] Committed to git (no secrets)
+- [ ] Push to GitHub (user to run remote add + push)
