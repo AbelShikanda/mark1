@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.db
+.env
+venv/
+.venv/
+.env.local
+whatsapp_session/
+logs/
+data/
+reports/
+*.egg-info/
+dist/
+build/
+node_modules/
+.DS_Store
