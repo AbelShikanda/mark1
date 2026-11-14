@@ -1,30 +1,109 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { api } from './api';
 import ProductsPage from './pages/ProductsPage';
 import GroupsPage from './pages/GroupsPage';
+import ClientsPage from './pages/ClientsPage';
 import CampaignsPage from './pages/CampaignsPage';
+import SchedulesPage from './pages/SchedulesPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import LogsPage from './pages/LogsPage';
+import LivePage from './pages/LivePage';
+import SettingsPage from './pages/SettingsPage';
 
-type Page = 'products' | 'groups' | 'campaigns' | 'analytics' | 'logs';
+type Page = 'products' | 'groups' | 'clients' | 'campaigns' | 'live' | 'schedules' | 'analytics' | 'logs' | 'settings';
 
 const ICONS: Record<Page, string> = {
   products: '🛒',
   groups: '👥',
+  clients: '👤',
   campaigns: '📤',
+  live: '📡',
+  schedules: '📅',
   analytics: '📊',
   logs: '📝',
+  settings: '⚙️',
 };
 
 const NAV: { key: Page; label: string }[] = [
   { key: 'products', label: 'Products' },
   { key: 'groups', label: 'Groups' },
+  { key: 'clients', label: 'Clients' },
   { key: 'campaigns', label: 'Campaigns' },
+  { key: 'live', label: 'Live' },
+  { key: 'schedules', label: 'Schedules' },
   { key: 'analytics', label: 'Analytics' },
   { key: 'logs', label: 'Logs' },
+  { key: 'settings', label: 'Settings' },
 ];
+
+type Connection = { state: string; message: string | null };
+
+const CONNECTION_DOT: Record<string, string> = {
+  connected: 'bg-emerald-400',
+  launching: 'bg-amber-400',
+  loading: 'bg-amber-400',
+  reconnecting: 'bg-amber-400',
+  waiting_login: 'bg-blue-400',
+  waiting_qr: 'bg-blue-400',
+  disconnected: 'bg-red-400',
+  error: 'bg-red-400',
+  stopped: 'bg-slate-400',
+  unknown: 'bg-slate-500',
+};
+
+const CONNECTION_LABEL: Record<string, string> = {
+  connected: 'WhatsApp connected',
+  launching: 'WhatsApp launching',
+  loading: 'WhatsApp loading',
+  reconnecting: 'WhatsApp reconnecting',
+  waiting_login: 'WhatsApp login needed',
+  waiting_qr: 'WhatsApp QR needed',
+  disconnected: 'WhatsApp disconnected',
+  error: 'WhatsApp error',
+  stopped: 'WhatsApp stopped',
+  unknown: 'WhatsApp unknown',
+};
 
 export default function App() {
   const [page, setPage] = useState<Page>('products');
+  const [liveCampaignId, setLiveCampaignId] = useState<number | null>(null);
+  const [connection, setConnection] = useState<Connection | null>(null);
+  const [connectionOffline, setConnectionOffline] = useState(false);
+
+  useEffect(() => {
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const res = await api.get<Connection>('/live/connection');
+        if (stopped) return;
+        setConnection(res.data);
+        setConnectionOffline(false);
+      } catch {
+        if (!stopped) setConnectionOffline(true);
+      }
+    };
+    tick();
+    const timer = window.setInterval(tick, 5000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const connectionState = connectionOffline ? 'unknown' : connection?.state ?? 'unknown';
+  const connectionLabel = connectionOffline
+    ? 'Bot API unreachable'
+    : CONNECTION_LABEL[connection?.state ?? 'unknown'] ?? CONNECTION_LABEL.unknown;
+
+  const openLive = (campaignId?: number) => {
+    setLiveCampaignId(campaignId ?? null);
+    setPage('live');
+  };
+
+  const navigate = (target: Page) => {
+    if (target === 'live') setLiveCampaignId(null);
+    setPage(target);
+  };
 
   return (
     <div className="flex h-screen bg-gray-50 text-slate-900">
@@ -38,7 +117,7 @@ export default function App() {
             return (
               <button
                 key={item.key}
-                onClick={() => setPage(item.key)}
+                onClick={() => navigate(item.key)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm transition ${
                   active
                     ? 'bg-indigo-600/20 text-indigo-100 border-r-2 border-indigo-400'
@@ -51,17 +130,30 @@ export default function App() {
             );
           })}
         </nav>
-        <div className="p-4 text-xs text-slate-400 border-t border-slate-700">
-          Bot API: http://localhost:8000
+        <div className="space-y-2 border-t border-slate-700 p-4 text-xs text-slate-400">
+          <button
+            type="button"
+            onClick={() => openLive()}
+            title={connection?.message ?? connectionLabel}
+            className="flex w-full items-center gap-2 text-left hover:text-slate-200"
+          >
+            <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${CONNECTION_DOT[connectionState] ?? CONNECTION_DOT.unknown}`} />
+            <span className="truncate">{connectionLabel}</span>
+          </button>
+          <div>Bot API: http://localhost:8000</div>
         </div>
       </aside>
 
       <main className="flex-1 overflow-auto p-6">
         {page === 'products' && <ProductsPage />}
         {page === 'groups' && <GroupsPage />}
-        {page === 'campaigns' && <CampaignsPage />}
+        {page === 'clients' && <ClientsPage />}
+        {page === 'campaigns' && <CampaignsPage onOpenLive={openLive} />}
+        {page === 'live' && <LivePage initialCampaignId={liveCampaignId} />}
+        {page === 'schedules' && <SchedulesPage />}
         {page === 'analytics' && <AnalyticsPage />}
         {page === 'logs' && <LogsPage />}
+        {page === 'settings' && <SettingsPage />}
       </main>
     </div>
   );

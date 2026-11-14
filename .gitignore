@@ -2,16 +2,28 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.db
+*.db-wal
+*.db-shm
 .env
+.env.local
 venv/
 .venv/
-.env.local
 whatsapp_session/
 logs/
 data/
+uploads/
 reports/
 *.egg-info/
 dist/
 build/
 node_modules/
+run.log
+backend.log
+.launcher.lock/
 .DS_Store
+
+# Locally supplied reference/adoption sources. Only the group seed is part of
+# the app; the other files may contain personal contact data, so keep them out
+# of git.
+backend/adopt/*
+!backend/adopt/target_groups.py
