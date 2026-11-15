@@ -120,15 +120,115 @@ def clear_session_dir() -> None:
         pass
 
 
+def _browser_open_state() -> Dict[str, Any]:
+    with _bot_lock:
+        bot = _bot
+    state = get_connection_state()
+    headless = bot.headless if bot is not None else app_settings.get_bool("headless", False)
+    return {
+        "state": state.get("state"),
+        "qr_visible": bool(state.get("qr_visible")),
+        "headless": bool(headless),
+        "browser_open": bool(bot is not None and not bot.is_browser_closed()),
+    }
+
+
 def session_status() -> Dict[str, Any]:
     limit = max(1, app_settings.get_int("qr_after_logins", 1))
     used = max(0, app_settings.get_meta_int(SESSION_RUNS_KEY, 0))
-    state = get_connection_state()
     return {
         "used": used,
         "limit": limit,
         "session_exists": _session_dir_has_files(),
-        "connected": bool(state.get("state") == "connected"),
+        "connected": _browser_open_state()["state"] == "connected",
+        **_browser_open_state(),
+    }
+
+
+def session_qr() -> Dict[str, Any]:
+    """Snapshot of the login flow for the dashboard QR panel."""
+    with _bot_lock:
+        bot = _bot
+    state = get_connection_state()
+    waiting = bool(state.get("qr_visible")) or state.get("state") in ("waiting_qr", "waiting_login")
+    data_url = bot.qr_data_url() if (bot is not None and waiting) else None
+    if bot is None:
+        message = "No WhatsApp browser is running. Start a campaign run; the QR code will appear here."
+    elif data_url:
+        message = (
+            "QR captured from the hidden browser."
+            if bot.headless
+            else "Browser is visible; scan the QR code in the window."
+        )
+    elif waiting:
+        message = "Waiting for the QR code to render in WhatsApp Web…"
+    else:
+        message = "A QR code is only available while WhatsApp needs to log in."
+    return {
+        "available": bool(data_url) or waiting,
+        "qr_data_url": data_url,
+        "message": message,
+        "headless": bool(bot.headless) if bot is not None else app_settings.get_bool("headless", False),
+        "browser_open": bool(bot is not None and not bot.is_browser_closed()),
+        "state": state.get("state"),
+    }
+
+
+def show_browser() -> Dict[str, Any]:
+    """Temporarily switch a hidden session to a visible window for scanning."""
+    with _bot_lock:
+        bot = _bot
+    if bot is None:
+        return {
+            "ok": True,
+            "message": (
+                "No WhatsApp browser is running. A run will open one automatically; "
+                "when headless, the QR appears in the dashboard."
+            ),
+            "browser_open": False,
+            "headless": app_settings.get_bool("headless", False),
+        }
+    if not bot.headless:
+        return {
+            "ok": True,
+            "message": "The browser window is already visible.",
+            "browser_open": not bot.is_browser_closed(),
+            "headless": False,
+        }
+    ok = bot.switch_to_headed_for_qr()
+    return {
+        "ok": ok,
+        "message": (
+            "Opened a visible WhatsApp browser; scan the QR code in the window "
+            "(it also appears on the Live page)."
+            if ok
+            else "Could not open a visible window. The QR on the Live page still works."
+        ),
+        "browser_open": not bot.is_browser_closed(),
+        "headless": bot.headless,
+    }
+
+
+def use_headless() -> Dict[str, Any]:
+    """Persist headless mode and relaunch the live session hidden."""
+    try:
+        app_settings.update_settings({"headless": True})
+    except Exception as exc:  # settings write failed; still report gracefully
+        log("warning", f"could not persist headless setting: {exc}", "whatsapp")
+    with _bot_lock:
+        bot = _bot
+    ok = True
+    if bot is not None and not bot.headless:
+        ok = bot.relaunch_headless()
+    return {
+        "ok": ok,
+        "message": (
+            "Switched WhatsApp to headless mode."
+            if ok
+            else "Headless relaunch failed; the visible window was kept open."
+        ),
+        "browser_open": bool(bot is not None and not bot.is_browser_closed()),
+        "headless": True,
     }
 
 
@@ -1025,7 +1125,7 @@ def run_campaign(cid: int) -> None:
         session_info = prepare_session_for_run()
         session_limit = int(session_info.get("limit") or session_limit)
 
-        bot = get_bot(headless=False)
+        bot = get_bot(headless=app_settings.get_bool("headless", False))
         app_settings.set_meta_int(
             SESSION_RUNS_KEY,
             app_settings.get_meta_int(SESSION_RUNS_KEY, 0) + 1,

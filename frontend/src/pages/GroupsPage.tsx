@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api, getErrorMessage } from '../api';
 import ErrorBanner from '../components/ErrorBanner';
+import DataTable, { TableToolbar, type DataTableColumn } from '../components/DataTable';
+import { useTableFilters } from '../hooks/useTableFilters';
+import { BTN_PRIMARY, BTN_SECONDARY, CARD_PAD, INPUT, MUTED, SUBTLE } from '../ui';
 import { isValidUrl, normalizeUrl } from '../validation';
 
 type Group = {
@@ -43,6 +46,8 @@ const EMPTY = {
   isMyGroup: false,
   isCore: false,
 };
+
+const ACTION_BTN = 'rounded border px-2 py-1 text-xs disabled:opacity-40';
 
 export default function GroupsPage() {
   const [groups, setGroups] = useState<Group[]>([]);
@@ -268,7 +273,7 @@ export default function GroupsPage() {
 
   const clearBatchGroups = () => setBatchGroupIds([]);
 
-  const visible = groups.filter((g) => {
+  const baseGroups = groups.filter((g) => {
     if (filter === 'mine') return Boolean(g.is_my_group);
     if (filter === 'core') return Boolean(g.is_core);
     if (filter === 'inactive') return !g.is_active;
@@ -276,363 +281,515 @@ export default function GroupsPage() {
   });
   const silencedGroups = groups.filter((g) => Boolean(g.is_silenced));
 
+  const groupsTable = useTableFilters<Group>(
+    baseGroups,
+    (g) => [g.name, g.category, g.location, g.link].filter(Boolean).join(' '),
+    [
+      { key: 'name', label: 'Name', getValue: (g) => g.name },
+      { key: 'category', label: 'Category', getValue: (g) => g.category ?? '' },
+      { key: 'location', label: 'Location', getValue: (g) => g.location ?? '' },
+      {
+        key: 'tags',
+        label: 'Tags',
+        type: 'select',
+        options: [
+          { value: 'mine', label: 'Mine' },
+          { value: 'core', label: 'Core' },
+          { value: 'active', label: 'Active' },
+          { value: 'disabled', label: 'Disabled' },
+          { value: 'silenced', label: 'Silenced' },
+        ],
+        getValue: (g) =>
+          [
+            g.is_my_group ? 'mine' : '',
+            g.is_core ? 'core' : '',
+            g.is_active ? 'active' : 'disabled',
+            g.is_silenced ? 'silenced' : '',
+          ].filter(Boolean).join(' '),
+        match: 'contains',
+      },
+    ],
+  );
+
+  const silencedTable = useTableFilters<Group>(
+    silencedGroups,
+    (g) => [g.name, g.category, g.location, g.silence_reason].filter(Boolean).join(' '),
+    [
+      { key: 'name', label: 'Group', getValue: (g) => g.name },
+      { key: 'category', label: 'Category', getValue: (g) => g.category ?? '' },
+      { key: 'location', label: 'Location', getValue: (g) => g.location ?? '' },
+    ],
+  );
+
+  const batchesTable = useTableFilters<GroupBatch>(
+    batches,
+    (batch) => [batch.name, batch.description].filter(Boolean).join(' '),
+    [{ key: 'batch', label: 'Batch', getValue: (batch) => batch.name }],
+  );
+
+  const groupsColumns: DataTableColumn<Group>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      filter: { type: 'text', placeholder: 'Filter name' },
+      cell: (g) => (
+        <div>
+          <div className="font-medium">{g.name}</div>
+          {g.link && <div className="max-w-xs truncate text-xs text-indigo-600 dark:text-indigo-400">{g.link}</div>}
+          {g.failures > 0 && <div className="text-xs text-orange-600 dark:text-orange-400">{g.failures} consecutive miss(es)</div>}
+          {g.is_silenced && <div className="text-xs text-red-600 dark:text-red-400">Silenced: {g.silence_reason ?? 'too many misses'}</div>}
+        </div>
+      ),
+    },
+    {
+      key: 'category',
+      header: 'Category',
+      filter: { type: 'text', placeholder: 'Filter category' },
+      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cell: (g) => g.category ?? '-',
+    },
+    {
+      key: 'location',
+      header: 'Location',
+      filter: { type: 'text', placeholder: 'Filter location' },
+      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cell: (g) => g.location ?? '-',
+    },
+    {
+      key: 'posted',
+      header: 'Posted today / limit',
+      cellClassName: 'text-xs',
+      cell: (g) => `${g.isPostedProductToday} / ${g.n}`,
+    },
+    {
+      key: 'misses',
+      header: 'Misses',
+      cellClassName: 'text-xs',
+      cell: (g) => (
+        <>
+          <div>{g.total_misses ?? 0} total</div>
+          {g.last_missed_at && <div className={SUBTLE}>last {g.last_missed_at}</div>}
+        </>
+      ),
+    },
+    {
+      key: 'tags',
+      header: 'Tags',
+      filter: {
+        type: 'select',
+        placeholder: 'All tags',
+        options: [
+          { value: 'mine', label: 'Mine' },
+          { value: 'core', label: 'Core' },
+          { value: 'active', label: 'Active' },
+          { value: 'disabled', label: 'Disabled' },
+          { value: 'silenced', label: 'Silenced' },
+        ],
+      },
+      cell: (g) => (
+        <div className="flex flex-wrap gap-1">
+          {g.is_my_group && <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-200">Mine</span>}
+          {g.is_core && <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-950/60 dark:text-amber-200">Core</span>}
+          {!g.is_active && <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700 dark:bg-red-950/60 dark:text-red-200">Disabled</span>}
+          {g.is_silenced && <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700 dark:bg-red-950/60 dark:text-red-200">Silenced</span>}
+        </div>
+      ),
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      cell: (g) => (
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => startEdit(g)} className={`${ACTION_BTN} border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/50`}>
+            Edit
+          </button>
+          {g.is_silenced && (
+            <button
+              onClick={() => unsilence(g)}
+              disabled={busyId === g.id}
+              className={`${ACTION_BTN} border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/50`}
+            >
+              {busyId === g.id ? 'Clearing…' : 'Unsilence'}
+            </button>
+          )}
+          <button
+            onClick={() => toggleActive(g)}
+            disabled={busyId === g.id}
+            className={`${ACTION_BTN} border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800`}
+          >
+            {g.is_active ? 'Disable' : 'Enable'}
+          </button>
+          <button
+            onClick={() => remove(g)}
+            disabled={busyId === g.id}
+            className={`${ACTION_BTN} border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50`}
+          >
+            {busyId === g.id ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
+      ),
+    },
+  ];
+
+  const silencedColumns: DataTableColumn<Group>[] = [
+    {
+      key: 'name',
+      header: 'Group',
+      filter: { type: 'text', placeholder: 'Filter group' },
+      cell: (g) => (
+        <div>
+          <div className="font-medium">{g.name}</div>
+          {g.link && <div className="max-w-xs truncate text-xs text-indigo-600 dark:text-indigo-400">{g.link}</div>}
+          <div className="text-xs text-red-600 dark:text-red-400">{g.silence_reason ?? 'Too many consecutive misses'}</div>
+        </div>
+      ),
+    },
+    {
+      key: 'category',
+      header: 'Category',
+      filter: { type: 'text', placeholder: 'Filter category' },
+      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cell: (g) => g.category ?? '-',
+    },
+    {
+      key: 'location',
+      header: 'Location',
+      filter: { type: 'text', placeholder: 'Filter location' },
+      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cell: (g) => g.location ?? '-',
+    },
+    {
+      key: 'misses',
+      header: 'Misses',
+      cellClassName: 'text-xs',
+      cell: (g) => (
+        <>
+          <div>{g.total_misses ?? 0} total</div>
+          <div className="text-orange-600 dark:text-orange-400">{g.failures ?? 0} consecutive</div>
+        </>
+      ),
+    },
+    {
+      key: 'silenced',
+      header: 'Silenced',
+      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cell: (g) => g.silenced_at ?? '-',
+    },
+    {
+      key: 'last_success',
+      header: 'Last success',
+      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cell: (g) => g.last_success_at ?? '-',
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      cell: (g) => (
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => startEdit(g)} className={`${ACTION_BTN} border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/50`}>
+            Edit
+          </button>
+          <button
+            onClick={() => unsilence(g)}
+            disabled={busyId === g.id}
+            className={`${ACTION_BTN} border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/50`}
+          >
+            {busyId === g.id ? 'Clearing…' : 'Unsilence'}
+          </button>
+          <button
+            onClick={() => remove(g)}
+            disabled={busyId === g.id}
+            className={`${ACTION_BTN} border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50`}
+          >
+            Delete
+          </button>
+        </div>
+      ),
+    },
+  ];
+
+  const batchColumns: DataTableColumn<GroupBatch>[] = [
+    {
+      key: 'batch',
+      header: 'Batch',
+      filter: { type: 'text', placeholder: 'Filter batch' },
+      cell: (batch) => (
+        <div>
+          <div className="font-medium">{batch.name}</div>
+          {batch.description && <div className="text-xs text-slate-500 dark:text-slate-400">{batch.description}</div>}
+        </div>
+      ),
+    },
+    {
+      key: 'groups',
+      header: 'Groups',
+      cellClassName: 'text-xs',
+      cell: (batch) => batch.group_count ?? batch.group_ids?.length ?? 0,
+    },
+    {
+      key: 'campaigns',
+      header: 'Used by campaigns',
+      cellClassName: 'text-xs',
+      cell: (batch) => batch.campaign_count ?? 0,
+    },
+    {
+      key: 'updated',
+      header: 'Updated',
+      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cell: (batch) => batch.updated_at ?? batch.created_at ?? '—',
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      cell: (batch) => (
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => startEditBatch(batch)}
+            className={`${ACTION_BTN} border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/50`}
+          >
+            Edit
+          </button>
+          <button
+            onClick={() => removeBatch(batch)}
+            disabled={batchBusyId === batch.id}
+            className={`${ACTION_BTN} border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50`}
+          >
+            {batchBusyId === batch.id ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
+      ),
+    },
+  ];
+
+  const tabClass = (active: boolean) =>
+    `rounded-t border-b-2 px-4 py-2 text-sm font-medium ${
+      active
+        ? 'border-indigo-600 text-indigo-700 dark:border-indigo-400 dark:text-indigo-300'
+        : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100'
+    }`;
+
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Groups</h1>
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      <div className="sticky top-0 z-20 -mx-6 flex w-[calc(100%+3rem)] gap-1 border-b border-slate-200 bg-gray-50/95 px-6 py-2 backdrop-blur">
-        <button
-          type="button"
-          onClick={() => setView('groups')}
-          className={`rounded-t border-b-2 px-4 py-2 text-sm font-medium ${view === 'groups' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
-        >
-          Groups <span className="ml-1 rounded-full bg-slate-200 px-2 py-0.5 text-xs text-slate-600">{groups.length}</span>
+      <div className="sticky top-0 z-20 -mx-6 flex w-[calc(100%+3rem)] gap-1 border-b border-slate-200 bg-gray-50/95 px-6 py-2 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
+        <button type="button" onClick={() => setView('groups')} className={tabClass(view === 'groups')}>
+          Groups <span className="ml-1 rounded-full bg-slate-200 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{groups.length}</span>
         </button>
-        <button
-          type="button"
-          onClick={() => setView('silenced')}
-          className={`rounded-t border-b-2 px-4 py-2 text-sm font-medium ${view === 'silenced' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
-        >
-          Silenced <span className="ml-1 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">{silencedGroups.length}</span>
+        <button type="button" onClick={() => setView('silenced')} className={tabClass(view === 'silenced')}>
+          Silenced <span className="ml-1 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700 dark:bg-red-950/60 dark:text-red-200">{silencedGroups.length}</span>
         </button>
-        <button
-          type="button"
-          onClick={() => setView('batches')}
-          className={`rounded-t border-b-2 px-4 py-2 text-sm font-medium ${view === 'batches' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
-        >
-          Group batches <span className="ml-1 rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700">{batches.length}</span>
+        <button type="button" onClick={() => setView('batches')} className={tabClass(view === 'batches')}>
+          Group batches <span className="ml-1 rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200">{batches.length}</span>
         </button>
       </div>
 
       {view === 'groups' && (
         <>
-      <div className="bg-white p-4 rounded-lg border shadow-sm">
-        <form onSubmit={save} className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <input className="border rounded p-2" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <input className="border rounded p-2" placeholder="Category (optional)" value={category} onChange={(e) => setCategory(e.target.value)} />
-          <input className="border rounded p-2" placeholder="Location / region (optional)" value={location} onChange={(e) => setLocation(e.target.value)} />
-          <input className="border rounded p-2" type="number" min="1" placeholder="Posts per day (n)" value={n} onChange={(e) => setN(e.target.value)} />
-          <input className="border rounded p-2 md:col-span-2" inputMode="url" placeholder="My group link (e.g. chat.whatsapp.com/…)" value={link} onChange={(e) => setLink(e.target.value)} />
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={isMyGroup} onChange={(e) => setIsMyGroup(e.target.checked)} /> My group
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={isCore} onChange={(e) => setIsCore(e.target.checked)} /> Core group
-          </label>
-          <div className="flex gap-2">
-            <button className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50" disabled={saving || !name}>
-              {saving ? 'Saving…' : editingId ? 'Save changes' : 'Add group'}
-            </button>
-            {editingId && (
-              <button type="button" onClick={resetForm} className="border border-slate-300 px-4 py-2 rounded text-slate-600 hover:bg-slate-50">
-                Cancel
-              </button>
-            )}
+          <div className={CARD_PAD}>
+            <form onSubmit={save} className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <input className={INPUT} placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+              <input className={INPUT} placeholder="Category (optional)" value={category} onChange={(e) => setCategory(e.target.value)} />
+              <input className={INPUT} placeholder="Location / region (optional)" value={location} onChange={(e) => setLocation(e.target.value)} />
+              <input className={INPUT} type="number" min="1" placeholder="Posts per day (n)" value={n} onChange={(e) => setN(e.target.value)} />
+              <input className={`${INPUT} md:col-span-2`} inputMode="url" placeholder="My group link (e.g. chat.whatsapp.com/…)" value={link} onChange={(e) => setLink(e.target.value)} />
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={isMyGroup} onChange={(e) => setIsMyGroup(e.target.checked)} /> My group
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={isCore} onChange={(e) => setIsCore(e.target.checked)} /> Core group
+              </label>
+              <div className="flex gap-2">
+                <button className={BTN_PRIMARY} disabled={saving || !name}>
+                  {saving ? 'Saving…' : editingId ? 'Save changes' : 'Add group'}
+                </button>
+                {editingId && (
+                  <button type="button" onClick={resetForm} className={BTN_SECONDARY}>
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </form>
+            <p className={`mt-2 text-xs ${MUTED}`}>
+              Core groups are prioritised as link sources and excluded as link targets. Only “My groups” with a link are used by link campaigns.
+            </p>
+            <p className={`mt-2 text-xs ${MUTED}`}>
+              The silence threshold and other automation parameters live on the Settings page.
+            </p>
           </div>
-        </form>
-        <p className="mt-2 text-xs text-slate-500">
-          Core groups are prioritised as link sources and excluded as link targets. Only “My groups” with a link are used by link campaigns.
-        </p>
-        <p className="mt-2 text-xs text-slate-500">
-          The silence threshold and other automation parameters live on the Settings page.
-        </p>
-      </div>
 
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-slate-500">Show:</span>
-        <select className="border rounded p-2 text-sm" value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
-          <option value="all">All groups</option>
-          <option value="mine">My groups</option>
-          <option value="core">Core groups</option>
-          <option value="inactive">Disabled groups</option>
-        </select>
-        <span className="text-xs text-slate-400">{visible.length} shown</span>
-      </div>
-
-      <div className="max-h-[65vh] w-full overflow-auto rounded-lg border border-slate-200">
-      <table className="w-full min-w-[760px] border-collapse">
-        <thead className="sticky top-0 z-10">
-          <tr className="bg-slate-100 text-left text-xs uppercase text-slate-500">
-            <th className="p-3 border-b">Name</th>
-            <th className="p-3 border-b">Category</th>
-            <th className="p-3 border-b">Location</th>
-            <th className="p-3 border-b">Posted today / limit</th>
-            <th className="p-3 border-b">Misses</th>
-            <th className="p-3 border-b">Tags</th>
-            <th className="p-3 border-b">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {visible.map((g) => (
-            <tr key={g.id} className={`border-b hover:bg-slate-50 ${editingId === g.id ? 'bg-indigo-50/50' : ''}`}>
-              <td className="p-3">
-                <div className="font-medium">{g.name}</div>
-                {g.link && <div className="text-xs text-indigo-600 truncate max-w-xs">{g.link}</div>}
-                {g.failures > 0 && <div className="text-xs text-orange-600">{g.failures} consecutive miss(es)</div>}
-                {g.is_silenced && <div className="text-xs text-red-600">Silenced: {g.silence_reason ?? 'too many misses'}</div>}
-              </td>
-              <td className="p-3 text-slate-500 text-xs">{g.category ?? '-'}</td>
-              <td className="p-3 text-slate-500 text-xs">{g.location ?? '-'}</td>
-              <td className="p-3 text-xs">{g.isPostedProductToday} / {g.n}</td>
-              <td className="p-3 text-xs">
-                <div>{g.total_misses ?? 0} total</div>
-                {g.last_missed_at && <div className="text-slate-400">last {g.last_missed_at}</div>}
-              </td>
-              <td className="p-3">
-                <div className="flex flex-wrap gap-1">
-                  {g.is_my_group && <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">Mine</span>}
-                  {g.is_core && <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700">Core</span>}
-                  {!g.is_active && <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">Disabled</span>}
-                  {g.is_silenced && <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">Silenced</span>}
-                </div>
-              </td>
-              <td className="p-3">
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={() => startEdit(g)} className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50">
-                    Edit
-                  </button>
-                  {g.is_silenced && (
-                    <button
-                      onClick={() => unsilence(g)}
-                      disabled={busyId === g.id}
-                      className="rounded border border-emerald-300 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 disabled:opacity-40"
-                    >
-                      {busyId === g.id ? 'Clearing…' : 'Unsilence'}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => toggleActive(g)}
-                    disabled={busyId === g.id}
-                    className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-40"
-                  >
-                    {g.is_active ? 'Disable' : 'Enable'}
-                  </button>
-                  <button
-                    onClick={() => remove(g)}
-                    disabled={busyId === g.id}
-                    className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-40"
-                  >
-                    {busyId === g.id ? 'Deleting…' : 'Delete'}
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
-          {visible.length === 0 && (
-            <tr><td colSpan={7} className="p-4 text-center text-slate-400">No groups match this filter.</td></tr>
-          )}
-        </tbody>
-      </table>
-      </div>
+          <section className="space-y-3">
+            <TableToolbar
+              search={groupsTable.search}
+              onSearch={groupsTable.setSearch}
+              placeholder="Search groups by name, category, location, or link…"
+              count={groupsTable.count}
+              total={groupsTable.total}
+              onClear={groupsTable.clearFilters}
+              isFiltered={groupsTable.isFiltered}
+            >
+              <select
+                className={`${INPUT} py-2 text-xs`}
+                value={filter}
+                onChange={(e) => setFilter(e.target.value as typeof filter)}
+                aria-label="Group visibility filter"
+              >
+                <option value="all">All groups</option>
+                <option value="mine">My groups</option>
+                <option value="core">Core groups</option>
+                <option value="inactive">Disabled groups</option>
+              </select>
+            </TableToolbar>
+            <DataTable
+              columns={groupsColumns}
+              rows={groupsTable.filtered}
+              rowKey={(g) => g.id}
+              filters={groupsTable.values}
+              onFilterChange={groupsTable.setFilter}
+              emptyMessage="No groups match the current filters."
+              minWidth="760px"
+              rowClassName={(g) => (editingId === g.id ? 'bg-indigo-50/60 dark:bg-indigo-950/30' : '')}
+            />
+          </section>
         </>
       )}
 
       {view === 'silenced' && (
-        <div className="w-full space-y-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="space-y-3">
           <div>
             <h2 className="text-xl font-bold">Silenced groups</h2>
-            <p className="mt-1 text-xs text-slate-500">
+            <p className={`mt-1 text-xs ${MUTED}`}>
               Groups are silenced after repeated consecutive misses and are skipped by campaigns until you clear them.
               Clearing a group resets its consecutive miss count so it becomes eligible again.
             </p>
           </div>
 
-          <div className="max-h-[65vh] w-full overflow-auto rounded-lg border border-slate-200">
-            <table className="w-full min-w-[760px] border-collapse">
-              <thead className="sticky top-0 z-10">
-                <tr className="bg-slate-100 text-left text-xs uppercase text-slate-500">
-                  <th className="p-3 border-b">Group</th>
-                  <th className="p-3 border-b">Category</th>
-                  <th className="p-3 border-b">Location</th>
-                  <th className="p-3 border-b">Misses</th>
-                  <th className="p-3 border-b">Silenced</th>
-                  <th className="p-3 border-b">Last success</th>
-                  <th className="p-3 border-b">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {silencedGroups.map((g) => (
-                  <tr key={g.id} className="border-b hover:bg-slate-50">
-                    <td className="p-3">
-                      <div className="font-medium">{g.name}</div>
-                      {g.link && <div className="text-xs text-indigo-600 truncate max-w-xs">{g.link}</div>}
-                      <div className="text-xs text-red-600">{g.silence_reason ?? 'Too many consecutive misses'}</div>
-                    </td>
-                    <td className="p-3 text-slate-500 text-xs">{g.category ?? '-'}</td>
-                    <td className="p-3 text-slate-500 text-xs">{g.location ?? '-'}</td>
-                    <td className="p-3 text-xs">
-                      <div>{g.total_misses ?? 0} total</div>
-                      <div className="text-orange-600">{g.failures ?? 0} consecutive</div>
-                    </td>
-                    <td className="p-3 text-xs text-slate-500">{g.silenced_at ?? '-'}</td>
-                    <td className="p-3 text-xs text-slate-500">{g.last_success_at ?? '-'}</td>
-                    <td className="p-3">
-                      <div className="flex flex-wrap gap-2">
-                        <button onClick={() => startEdit(g)} className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50">
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => unsilence(g)}
-                          disabled={busyId === g.id}
-                          className="rounded border border-emerald-300 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 disabled:opacity-40"
-                        >
-                          {busyId === g.id ? 'Clearing…' : 'Unsilence'}
-                        </button>
-                        <button
-                          onClick={() => remove(g)}
-                          disabled={busyId === g.id}
-                          className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-40"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {silencedGroups.length === 0 && (
-                  <tr><td colSpan={7} className="p-4 text-center text-slate-400">No groups are silenced.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+          <TableToolbar
+            search={silencedTable.search}
+            onSearch={silencedTable.setSearch}
+            placeholder="Search silenced groups…"
+            count={silencedTable.count}
+            total={silencedTable.total}
+            onClear={silencedTable.clearFilters}
+            isFiltered={silencedTable.isFiltered}
+          />
+          <DataTable
+            columns={silencedColumns}
+            rows={silencedTable.filtered}
+            rowKey={(g) => g.id}
+            filters={silencedTable.values}
+            onFilterChange={silencedTable.setFilter}
+            emptyMessage="No groups are silenced."
+            minWidth="760px"
+          />
+        </section>
       )}
 
       {view === 'batches' && (
-      <div className="w-full space-y-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div>
-          <h2 className="text-xl font-bold">Group batches</h2>
-          <p className="mt-1 text-xs text-slate-500">
-            Reusable, live-linked presets. A campaign that uses a batch always resolves its groups at run time, so
-            editing the batch changes every campaign that references it on its next run.
-          </p>
-        </div>
-
-        <form onSubmit={saveBatch} className="space-y-3 rounded border border-slate-200 p-3">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <input
-              className="border rounded p-2"
-              placeholder="Batch name"
-              value={batchName}
-              onChange={(e) => setBatchName(e.target.value)}
-            />
-            <input
-              className="border rounded p-2"
-              placeholder="Description (optional)"
-              value={batchDescription}
-              onChange={(e) => setBatchDescription(e.target.value)}
-            />
+        <div className="w-full space-y-4">
+          <div>
+            <h2 className="text-xl font-bold">Group batches</h2>
+            <p className={`mt-1 text-xs ${MUTED}`}>
+              Reusable, live-linked presets. A campaign that uses a batch always resolves its groups at run time, so
+              editing the batch changes every campaign that references it on its next run.
+            </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <input
-              className="min-w-[220px] flex-1 border rounded p-2 text-sm"
-              placeholder="Search groups by name, category or location"
-              value={batchSearch}
-              onChange={(e) => setBatchSearch(e.target.value)}
-            />
-            <button type="button" className="text-indigo-600 hover:underline" onClick={selectAllBatchGroups}>
-              Select all
-            </button>
-            <button type="button" className="text-slate-500 hover:underline" onClick={clearBatchGroups}>
-              Clear
-            </button>
-            <span className="font-medium text-slate-700">{batchGroupIds.length} selected</span>
-          </div>
+          <form onSubmit={saveBatch} className={`${CARD_PAD} space-y-3`}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <input
+                className={INPUT}
+                placeholder="Batch name"
+                value={batchName}
+                onChange={(e) => setBatchName(e.target.value)}
+              />
+              <input
+                className={INPUT}
+                placeholder="Description (optional)"
+                value={batchDescription}
+                onChange={(e) => setBatchDescription(e.target.value)}
+              />
+            </div>
 
-          <div className="max-h-64 overflow-y-auto rounded border border-slate-200 p-2">
-            {batchGroupOptions.length === 0 && (
-              <div className="p-2 text-xs text-slate-400">No groups match this search.</div>
-            )}
-            {batchGroupOptions.map((g) => (
-              <label key={g.id} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-sm hover:bg-slate-50">
-                <span className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={batchGroupIds.includes(g.id)}
-                    onChange={() => toggleBatchGroup(g.id)}
-                  />
-                  <span>{g.name}</span>
-                </span>
-                <span className="flex flex-wrap justify-end gap-1">
-                  {g.is_core && <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700">Core</span>}
-                  {g.is_active ? (
-                    <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">Active</span>
-                  ) : (
-                    <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">Disabled</span>
-                  )}
-                </span>
-              </label>
-            ))}
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
-              disabled={batchSaving || !batchName.trim() || batchGroupIds.length === 0}
-            >
-              {batchSaving ? 'Saving…' : editingBatchId ? 'Save batch changes' : 'Create batch'}
-            </button>
-            {editingBatchId && (
-              <button
-                type="button"
-                onClick={resetBatchForm}
-                className="border border-slate-300 px-4 py-2 rounded text-slate-600 hover:bg-slate-50"
-              >
-                Cancel
+            <div className={`flex flex-wrap items-center gap-2 text-xs ${MUTED}`}>
+              <input
+                className={`${INPUT} min-w-[220px] flex-1`}
+                placeholder="Search groups by name, category or location"
+                value={batchSearch}
+                onChange={(e) => setBatchSearch(e.target.value)}
+              />
+              <button type="button" className="text-indigo-600 hover:underline dark:text-indigo-400" onClick={selectAllBatchGroups}>
+                Select all
               </button>
-            )}
-          </div>
-        </form>
+              <button type="button" className="text-slate-500 hover:underline dark:text-slate-400" onClick={clearBatchGroups}>
+                Clear
+              </button>
+              <span className="font-medium text-slate-700 dark:text-slate-200">{batchGroupIds.length} selected</span>
+            </div>
 
-        <div className="max-h-[55vh] w-full overflow-auto rounded-lg border border-slate-200">
-        <table className="w-full min-w-[620px] border-collapse">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-100 text-left text-xs uppercase text-slate-500">
-              <th className="p-3 border-b">Batch</th>
-              <th className="p-3 border-b">Groups</th>
-              <th className="p-3 border-b">Used by campaigns</th>
-              <th className="p-3 border-b">Updated</th>
-              <th className="p-3 border-b">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {batches.map((batch) => (
-              <tr key={batch.id} className={`border-b hover:bg-slate-50 ${editingBatchId === batch.id ? 'bg-indigo-50/50' : ''}`}>
-                <td className="p-3">
-                  <div className="font-medium">{batch.name}</div>
-                  {batch.description && <div className="text-xs text-slate-500">{batch.description}</div>}
-                </td>
-                <td className="p-3 text-xs">{batch.group_count ?? batch.group_ids?.length ?? 0}</td>
-                <td className="p-3 text-xs">{batch.campaign_count ?? 0}</td>
-                <td className="p-3 text-xs text-slate-500">{batch.updated_at ?? batch.created_at ?? '—'}</td>
-                <td className="p-3">
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      onClick={() => startEditBatch(batch)}
-                      className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => removeBatch(batch)}
-                      disabled={batchBusyId === batch.id}
-                      className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-40"
-                    >
-                      {batchBusyId === batch.id ? 'Deleting…' : 'Delete'}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {batches.length === 0 && (
-              <tr><td colSpan={5} className="p-4 text-center text-slate-400">No group batches yet.</td></tr>
-            )}
-          </tbody>
-        </table>
+            <div className="max-h-64 overflow-y-auto rounded border border-slate-200 p-2 dark:border-slate-700">
+              {batchGroupOptions.length === 0 && (
+                <div className="p-2 text-xs text-slate-400 dark:text-slate-500">No groups match this search.</div>
+              )}
+              {batchGroupOptions.map((g) => (
+                <label key={g.id} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">
+                  <span className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={batchGroupIds.includes(g.id)}
+                      onChange={() => toggleBatchGroup(g.id)}
+                    />
+                    <span>{g.name}</span>
+                  </span>
+                  <span className="flex flex-wrap justify-end gap-1">
+                    {g.is_core && <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-950/60 dark:text-amber-200">Core</span>}
+                    {g.is_active ? (
+                      <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-200">Active</span>
+                    ) : (
+                      <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700 dark:bg-red-950/60 dark:text-red-200">Disabled</span>
+                    )}
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                className={BTN_PRIMARY}
+                disabled={batchSaving || !batchName.trim() || batchGroupIds.length === 0}
+              >
+                {batchSaving ? 'Saving…' : editingBatchId ? 'Save batch changes' : 'Create batch'}
+              </button>
+              {editingBatchId && (
+                <button type="button" onClick={resetBatchForm} className={BTN_SECONDARY}>
+                  Cancel
+                </button>
+              )}
+            </div>
+          </form>
+
+          <TableToolbar
+            search={batchesTable.search}
+            onSearch={batchesTable.setSearch}
+            placeholder="Search batches…"
+            count={batchesTable.count}
+            total={batchesTable.total}
+            onClear={batchesTable.clearFilters}
+            isFiltered={batchesTable.isFiltered}
+          />
+          <DataTable
+            columns={batchColumns}
+            rows={batchesTable.filtered}
+            rowKey={(batch) => batch.id}
+            filters={batchesTable.values}
+            onFilterChange={batchesTable.setFilter}
+            emptyMessage="No group batches yet."
+            minWidth="620px"
+            maxHeight="max-h-[55vh]"
+            rowClassName={(batch) => (editingBatchId === batch.id ? 'bg-indigo-50/60 dark:bg-indigo-950/30' : '')}
+          />
         </div>
-      </div>
       )}
     </div>
   );

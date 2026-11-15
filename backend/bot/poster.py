@@ -768,6 +768,7 @@ def _open_chat_once(bot: WhatsAppBot, target: str, context: str, trace: Optional
 
     # Reset overlays/search from the previous target (or the previous attempt).
     _reset_chat_list(page, trace)
+    bot.dismiss_popups(handle_welcome=False)
 
     # Use the destructive recovery only *before* the search is filled.
     if not bot.ensure_connection(f"open_chat:search:{context}"):
@@ -864,6 +865,7 @@ def open_chat(
                 bot.page.keyboard.press("Escape")
             except Exception:
                 pass
+            bot.dismiss_popups(handle_welcome=False)
             time.sleep(delay)
     log("warning", f"'{target}' could not be opened after {attempts} attempts", "poster")
     return False
@@ -880,6 +882,7 @@ def _type_text(
 ) -> bool:
     page = bot.page
     selectors = CAPTION_INPUTS + COMPOSE_INPUTS if prefer_caption else COMPOSE_INPUTS
+    bot.dismiss_popups(handle_welcome=False)
     compose, selector = _first_visible(page, selectors)
     if not compose:
         if trace:
@@ -1024,6 +1027,7 @@ def _wait_for_link_preview(bot: WhatsAppBot, text: str, trace: Optional[Trace] =
 
 def _press_send(bot: WhatsAppBot, trace: Optional[Trace] = None) -> bool:
     page = bot.page
+    bot.dismiss_popups(handle_welcome=False)
     time.sleep(
         app_settings.get_float("after_typing_wait", AFTER_TYPING_WAIT) + random.uniform(0, 1)
     )

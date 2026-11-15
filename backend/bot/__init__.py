@@ -21,6 +21,9 @@ from .campaign_runner import (
     pick_equitable_random_product,
     build_product_text,
     build_link_text,
+    session_qr,
+    show_browser,
+    use_headless,
 )
 
 __all__ = [
@@ -49,4 +52,7 @@ __all__ = [
     "pick_equitable_random_product",
     "build_product_text",
     "build_link_text",
+    "session_qr",
+    "show_browser",
+    "use_headless",
 ]

@@ -9,6 +9,7 @@ import AnalyticsPage from './pages/AnalyticsPage';
 import LogsPage from './pages/LogsPage';
 import LivePage from './pages/LivePage';
 import SettingsPage from './pages/SettingsPage';
+import ThemeToggle from './components/ThemeToggle';
 
 type Page = 'products' | 'groups' | 'clients' | 'campaigns' | 'live' | 'schedules' | 'analytics' | 'logs' | 'settings';
 
@@ -106,9 +107,9 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50 text-slate-900">
-      <aside className="w-64 bg-slate-800 text-white flex flex-col">
-        <div className="p-6 font-bold text-lg flex items-center gap-2">
+    <div className="flex h-screen bg-gray-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <aside className="flex w-64 flex-col border-r border-slate-700 bg-slate-800 text-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex items-center gap-2 p-6 text-lg font-bold">
           📊 Marketing
         </div>
         <nav className="flex-1 px-4 space-y-1">
@@ -141,10 +142,14 @@ export default function App() {
             <span className="truncate">{connectionLabel}</span>
           </button>
           <div>Bot API: http://localhost:8000</div>
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <span>Appearance</span>
+            <ThemeToggle compact />
+          </div>
         </div>
       </aside>
 
-      <main className="flex-1 overflow-auto p-6">
+      <main className="flex-1 overflow-auto bg-gray-50 p-6 dark:bg-slate-950">
         {page === 'products' && <ProductsPage />}
         {page === 'groups' && <GroupsPage />}
         {page === 'clients' && <ClientsPage />}

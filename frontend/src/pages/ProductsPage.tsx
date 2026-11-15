@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { API_BASE, api, getErrorMessage } from '../api';
 import ErrorBanner from '../components/ErrorBanner';
+import DataTable, { TableToolbar, type DataTableColumn } from '../components/DataTable';
+import { useTableFilters } from '../hooks/useTableFilters';
 import { isValidMediaUrl, isValidUrl, normalizeMediaUrl, normalizeUrl } from '../validation';
+import { BTN_PRIMARY, CARD_PAD, INPUT, MUTED, NOTICE_SUCCESS } from '../ui';
 
 type Product = {
   id: number;
@@ -22,9 +25,9 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_STYLES: Record<string, string> = {
-  isPosted: 'bg-green-100 text-green-700',
-  isPending: 'bg-blue-100 text-blue-700',
-  isNotPosted: 'bg-slate-100 text-slate-600',
+  isPosted: 'bg-green-100 text-green-700 dark:bg-emerald-950/60 dark:text-emerald-300',
+  isPending: 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300',
+  isNotPosted: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
 };
 
 const EMPTY = {
@@ -43,6 +46,12 @@ type SeedSummary = {
   warnings: string[];
 };
 
+const STATUS_OPTIONS = [
+  { value: 'isNotPosted', label: 'Not posted' },
+  { value: 'isPending', label: 'Pending' },
+  { value: 'isPosted', label: 'Posted' },
+];
+
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [name, setName] = useState('');
@@ -56,8 +65,6 @@ export default function ProductsPage() {
   const [uploading, setUploading] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [seedSummary, setSeedSummary] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,6 +80,26 @@ export default function ProductsPage() {
   useEffect(() => {
     load();
   }, []);
+
+  const categories = useMemo(
+    () =>
+      Array.from(new Set(products.map((item) => item.category).filter(Boolean) as string[]))
+        .sort((a, b) => a.localeCompare(b))
+        .map((value) => ({ value, label: value })),
+    [products],
+  );
+
+  const table = useTableFilters<Product>(
+    products,
+    (product) =>
+      [product.name, product.link, product.category, product.description].filter(Boolean).join(' '),
+    [
+      { key: 'product', label: 'Product', getValue: (product) => `${product.name} ${product.description ?? ''}` },
+      { key: 'category', label: 'Category', type: 'select', options: categories, getValue: (product) => product.category ?? '' },
+      { key: 'status', label: 'Status', type: 'select', options: STATUS_OPTIONS, getValue: (product) => product.status },
+    ],
+    { category: '', status: '' },
+  );
 
   const resetForm = () => {
     setName(EMPTY.name);
@@ -216,67 +243,137 @@ export default function ProductsPage() {
     }
   };
 
-  const query = search.trim().toLowerCase();
-  const visibleProducts = products.filter((p) => {
-    const matchesSearch =
-      !query ||
-      p.name.toLowerCase().includes(query) ||
-      (p.link ?? '').toLowerCase().includes(query) ||
-      (p.category ?? '').toLowerCase().includes(query);
-    const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  const columns: DataTableColumn<Product>[] = [
+    {
+      key: 'product',
+      header: 'Product',
+      filter: { type: 'text', placeholder: 'Filter product' },
+      cell: (p) => (
+        <div className="flex items-start gap-3">
+          {p.media_url && (
+            <img
+              src={p.media_url.startsWith('http') || p.media_url.startsWith('data:') ? p.media_url : `${API_BASE}${p.media_url}`}
+              alt={p.name}
+              className="h-10 w-10 rounded border border-slate-200 object-cover dark:border-slate-700"
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+            />
+          )}
+          <div>
+            <div className="font-medium">{p.name}</div>
+            {p.description && <div className="line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{p.description}</div>}
+            {p.link && <div className="max-w-xs truncate text-xs text-indigo-600 dark:text-indigo-400">{p.link}</div>}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'category',
+      header: 'Category',
+      filter: { type: 'select', options: categories, placeholder: 'All categories' },
+      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cell: (p) => p.category ?? '-',
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      filter: { type: 'select', options: STATUS_OPTIONS, placeholder: 'All statuses' },
+      cell: (p) => (
+        <span className={`rounded px-2 py-1 text-xs ${STATUS_STYLES[p.status] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+          {STATUS_LABELS[p.status] ?? p.status}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      cell: (p) => (
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => startEdit(p)}
+            className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/50"
+          >
+            Edit
+          </button>
+          <button
+            onClick={() => setStatus(p.id, 'isNotPosted')}
+            disabled={busyId === p.id || p.status === 'isNotPosted'}
+            className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            Not posted
+          </button>
+          <button
+            onClick={() => setStatus(p.id, 'isPending')}
+            disabled={busyId === p.id || p.status === 'isPending'}
+            className="rounded border border-blue-300 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50 disabled:opacity-40 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950/50"
+          >
+            Pending
+          </button>
+          <button
+            onClick={() => setStatus(p.id, 'isPosted')}
+            disabled={busyId === p.id || p.status === 'isPosted'}
+            className="rounded border border-green-300 px-2 py-1 text-xs text-green-700 hover:bg-green-50 disabled:opacity-40 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/50"
+          >
+            Posted
+          </button>
+          <button
+            onClick={() => remove(p)}
+            disabled={busyId === p.id}
+            className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-40 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50"
+          >
+            Delete
+          </button>
+        </div>
+      ),
+    },
+  ];
 
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Products</h1>
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
       {seedSummary && (
-        <div className="flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+        <div className={`flex items-start justify-between gap-3 ${NOTICE_SUCCESS}`}>
           <span>{seedSummary}</span>
           <button
             type="button"
             onClick={() => setSeedSummary(null)}
-            className="text-xs text-emerald-700 hover:underline"
+            className="text-xs text-emerald-700 hover:underline dark:text-emerald-300"
           >
             Dismiss
           </button>
         </div>
       )}
 
-      <div className="bg-white p-4 rounded-lg border shadow-sm">
-        <form onSubmit={save} className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <input className="border rounded p-2" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <input className="border rounded p-2" placeholder="Category (optional)" value={category} onChange={(e) => setCategory(e.target.value)} />
-          <input className="border rounded p-2" inputMode="url" placeholder="Link (e.g. example.com)" value={link} onChange={(e) => setLink(e.target.value)} />
-          <input className="border rounded p-2 md:col-span-3" placeholder="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} />
-          <input className="border rounded p-2 md:col-span-2" inputMode="url" placeholder="Image URL (e.g. example.com/pic.jpg) or upload" value={mediaUrl} onChange={(e) => setMediaUrl(e.target.value)} />
+      <div className={CARD_PAD}>
+        <form onSubmit={save} className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <input className={INPUT} placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className={INPUT} placeholder="Category (optional)" value={category} onChange={(e) => setCategory(e.target.value)} />
+          <input className={INPUT} inputMode="url" placeholder="Link (e.g. example.com)" value={link} onChange={(e) => setLink(e.target.value)} />
+          <input className={`${INPUT} md:col-span-3`} placeholder="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} />
+          <input className={`${INPUT} md:col-span-2`} inputMode="url" placeholder="Image URL (e.g. example.com/pic.jpg) or upload" value={mediaUrl} onChange={(e) => setMediaUrl(e.target.value)} />
           <div className="flex items-center gap-2">
             <input type="file" accept="image/*" onChange={(e) => {
               if (e.target.files?.length) setFile(e.target.files[0]);
             }} />
-            {file && <span className="text-xs text-slate-500">{file.name}</span>}
+            {file && <span className={`text-xs ${MUTED}`}>{file.name}</span>}
           </div>
-          <div className="flex gap-2 md:col-span-3">
-            <button
-              className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
-              disabled={saving || !name}
-            >
+          <div className="flex flex-wrap gap-2 md:col-span-3">
+            <button className={BTN_PRIMARY} disabled={saving || !name}>
               {uploading ? 'Uploading image…' : saving ? 'Saving…' : editingId ? 'Save changes' : 'Add product'}
             </button>
             {editingId && (
-              <button type="button" onClick={resetForm} className="border border-slate-300 px-4 py-2 rounded text-slate-600 hover:bg-slate-50">
+              <button type="button" onClick={resetForm} className="rounded border border-slate-300 px-4 py-2 text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800">
                 Cancel edit
               </button>
             )}
-            <button type="button" onClick={resetAll} className="ml-auto text-xs text-slate-600 hover:text-slate-900 hover:underline">
+            <button type="button" onClick={resetAll} className="ml-auto text-xs text-slate-600 hover:text-slate-900 hover:underline dark:text-slate-400 dark:hover:text-slate-100">
               Reset every product to “Not posted”
             </button>
             <button
               type="button"
               onClick={seedProducts}
               disabled={seeding}
-              className="rounded border border-emerald-300 px-3 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+              className="rounded border border-emerald-300 px-3 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/50"
             >
               {seeding ? 'Seeding…' : 'Seed products'}
             </button>
@@ -284,112 +381,27 @@ export default function ProductsPage() {
         </form>
       </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-1 flex-col gap-2 sm:flex-row">
-          <input
-            className="w-full rounded border p-2 text-sm sm:max-w-sm"
-            placeholder="Search name, link or category"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <select
-            className="rounded border p-2 text-sm"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="all">All statuses</option>
-            <option value="isNotPosted">Not posted</option>
-            <option value="isPending">Pending</option>
-            <option value="isPosted">Posted</option>
-          </select>
-        </div>
-        <div className="text-xs text-slate-500">
-          Showing {visibleProducts.length} of {products.length} products
-        </div>
+      <div className="space-y-2">
+        <TableToolbar
+          search={table.search}
+          onSearch={table.setSearch}
+          placeholder="Search name, link, category or description"
+          count={table.count}
+          total={table.total}
+          onClear={table.clearFilters}
+          isFiltered={table.isFiltered}
+        />
       </div>
 
-      <table className="w-full border-collapse border border-slate-200 rounded-lg">
-        <thead>
-          <tr className="bg-slate-100 text-left text-xs uppercase text-slate-500">
-            <th className="p-3 border-b">Product</th>
-            <th className="p-3 border-b">Category</th>
-            <th className="p-3 border-b">Status</th>
-            <th className="p-3 border-b">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {visibleProducts.map((p) => (
-            <tr key={p.id} className={`border-b hover:bg-slate-50 ${editingId === p.id ? 'bg-indigo-50/50' : ''}`}>
-              <td className="p-3">
-                <div className="flex items-start gap-3">
-                  {p.media_url && (
-                    <img
-                      src={p.media_url.startsWith('http') || p.media_url.startsWith('data:') ? p.media_url : `${API_BASE}${p.media_url}`}
-                      alt={p.name}
-                      className="h-10 w-10 rounded object-cover border"
-                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                    />
-                  )}
-                  <div>
-                    <div className="font-medium">{p.name}</div>
-                    {p.description && <div className="text-xs text-slate-500 line-clamp-2">{p.description}</div>}
-                    {p.link && <div className="text-xs text-indigo-600 truncate max-w-xs">{p.link}</div>}
-                  </div>
-                </div>
-              </td>
-              <td className="p-3 text-slate-500 text-xs">{p.category ?? '-'}</td>
-              <td className="p-3">
-                <span className={`px-2 py-1 rounded text-xs ${STATUS_STYLES[p.status] ?? 'bg-slate-100 text-slate-600'}`}>
-                  {STATUS_LABELS[p.status] ?? p.status}
-                </span>
-              </td>
-              <td className="p-3">
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => startEdit(p)}
-                    className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => setStatus(p.id, 'isNotPosted')}
-                    disabled={busyId === p.id || p.status === 'isNotPosted'}
-                    className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-40"
-                  >
-                    Not posted
-                  </button>
-                  <button
-                    onClick={() => setStatus(p.id, 'isPending')}
-                    disabled={busyId === p.id || p.status === 'isPending'}
-                    className="rounded border border-blue-300 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50 disabled:opacity-40"
-                  >
-                    Pending
-                  </button>
-                  <button
-                    onClick={() => setStatus(p.id, 'isPosted')}
-                    disabled={busyId === p.id || p.status === 'isPosted'}
-                    className="rounded border border-green-300 px-2 py-1 text-xs text-green-700 hover:bg-green-50 disabled:opacity-40"
-                  >
-                    Posted
-                  </button>
-                  <button
-                    onClick={() => remove(p)}
-                    disabled={busyId === p.id}
-                    className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-40"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
-          {visibleProducts.length === 0 && (
-            <tr><td colSpan={4} className="p-4 text-center text-slate-400">
-              {products.length === 0 ? 'No products yet.' : 'No products match the current filters.'}
-            </td></tr>
-          )}
-        </tbody>
-      </table>
+      <DataTable
+        columns={columns}
+        rows={table.filtered}
+        rowKey={(p) => p.id}
+        filters={table.values}
+        onFilterChange={table.setFilter}
+        emptyMessage={products.length === 0 ? 'No products yet.' : 'No products match the current filters.'}
+        rowClassName={(p) => (editingId === p.id ? 'bg-indigo-50/50 dark:bg-indigo-950/30' : '')}
+      />
     </div>
   );
 }

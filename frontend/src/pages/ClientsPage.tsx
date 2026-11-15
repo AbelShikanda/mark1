@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api, getErrorMessage } from '../api';
 import ErrorBanner from '../components/ErrorBanner';
+import DataTable, { TableToolbar, type DataTableColumn } from '../components/DataTable';
+import { useTableFilters } from '../hooks/useTableFilters';
+import { BTN_PRIMARY, CARD_PAD, INPUT } from '../ui';
 import { isValidPhone } from '../validation';
 
 type Client = {
@@ -35,6 +38,18 @@ export default function ClientsPage() {
   useEffect(() => {
     load();
   }, []);
+
+  const table = useTableFilters<Client>(
+    clients,
+    (client) =>
+      [client.name, client.number, client.category, client.location].filter(Boolean).join(' '),
+    [
+      { key: 'name', label: 'Name', getValue: (client) => client.name },
+      { key: 'number', label: 'Number', getValue: (client) => client.number },
+      { key: 'category', label: 'Category', getValue: (client) => client.category ?? '' },
+      { key: 'location', label: 'Location', getValue: (client) => client.location ?? '' },
+    ],
+  );
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,59 +94,86 @@ export default function ClientsPage() {
     }
   };
 
+  const columns: DataTableColumn<Client>[] = [
+    { key: 'name', header: 'Name', filter: { type: 'text' }, cell: (c) => <span className="font-medium">{c.name}</span> },
+    {
+      key: 'number',
+      header: 'Number',
+      filter: { type: 'text' },
+      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cell: (c) => c.number,
+    },
+    {
+      key: 'category',
+      header: 'Category',
+      filter: { type: 'text' },
+      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cell: (c) => c.category ?? '-',
+    },
+    {
+      key: 'location',
+      header: 'Location',
+      filter: { type: 'text' },
+      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cell: (c) => c.location ?? '-',
+    },
+    {
+      key: 'birthday',
+      header: 'Birthday',
+      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cell: (c) => c.birthdays ?? '-',
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      cell: (c) => (
+        <button
+          onClick={() => remove(c)}
+          disabled={busyId === c.id}
+          className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-40 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50"
+        >
+          {busyId === c.id ? 'Deleting…' : 'Delete'}
+        </button>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Clients / Individuals</h1>
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      <div className="bg-white p-4 rounded-lg border shadow-sm">
-        <form onSubmit={add} className="grid grid-cols-1 md:grid-cols-6 gap-3">
-          <input className="border rounded p-2" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <input className="border rounded p-2" type="tel" inputMode="tel" placeholder="WhatsApp number (e.g. +1 555 123 4567)" value={number} onChange={(e) => setNumber(e.target.value)} />
-          <input className="border rounded p-2" placeholder="Category (optional)" value={category} onChange={(e) => setCategory(e.target.value)} />
-          <input className="border rounded p-2" placeholder="Location (optional)" value={location} onChange={(e) => setLocation(e.target.value)} />
-          <input className="border rounded p-2" placeholder="Birthday (optional)" value={birthdays} onChange={(e) => setBirthdays(e.target.value)} />
-          <button className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50" disabled={saving || !name || !number}>
+      <div className={CARD_PAD}>
+        <form onSubmit={add} className="grid grid-cols-1 gap-3 md:grid-cols-6">
+          <input className={INPUT} placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className={INPUT} type="tel" inputMode="tel" placeholder="WhatsApp number (e.g. +1 555 123 4567)" value={number} onChange={(e) => setNumber(e.target.value)} />
+          <input className={INPUT} placeholder="Category (optional)" value={category} onChange={(e) => setCategory(e.target.value)} />
+          <input className={INPUT} placeholder="Location (optional)" value={location} onChange={(e) => setLocation(e.target.value)} />
+          <input className={INPUT} placeholder="Birthday (optional)" value={birthdays} onChange={(e) => setBirthdays(e.target.value)} />
+          <button className={BTN_PRIMARY} disabled={saving || !name || !number}>
             {saving ? 'Saving…' : 'Add client'}
           </button>
         </form>
       </div>
 
-      <table className="w-full border-collapse border border-slate-200 rounded-lg">
-        <thead>
-          <tr className="bg-slate-100 text-left text-xs uppercase text-slate-500">
-            <th className="p-3 border-b">Name</th>
-            <th className="p-3 border-b">Number</th>
-            <th className="p-3 border-b">Category</th>
-            <th className="p-3 border-b">Location</th>
-            <th className="p-3 border-b">Birthday</th>
-            <th className="p-3 border-b">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {clients.map((c) => (
-            <tr key={c.id} className="border-b hover:bg-slate-50">
-              <td className="p-3">{c.name}</td>
-              <td className="p-3 text-slate-500 text-xs">{c.number}</td>
-              <td className="p-3 text-slate-500 text-xs">{c.category ?? '-'}</td>
-              <td className="p-3 text-slate-500 text-xs">{c.location ?? '-'}</td>
-              <td className="p-3 text-slate-500 text-xs">{c.birthdays ?? '-'}</td>
-              <td className="p-3">
-                <button
-                  onClick={() => remove(c)}
-                  disabled={busyId === c.id}
-                  className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-40"
-                >
-                  {busyId === c.id ? 'Deleting…' : 'Delete'}
-                </button>
-              </td>
-            </tr>
-          ))}
-          {clients.length === 0 && (
-            <tr><td colSpan={6} className="p-4 text-center text-slate-400">No clients yet.</td></tr>
-          )}
-        </tbody>
-      </table>
+      <TableToolbar
+        search={table.search}
+        onSearch={table.setSearch}
+        placeholder="Search name, number, category or location"
+        count={table.count}
+        total={table.total}
+        onClear={table.clearFilters}
+        isFiltered={table.isFiltered}
+      />
+
+      <DataTable
+        columns={columns}
+        rows={table.filtered}
+        rowKey={(c) => c.id}
+        filters={table.values}
+        onFilterChange={table.setFilter}
+        emptyMessage={clients.length === 0 ? 'No clients yet.' : 'No clients match the current filters.'}
+      />
     </div>
   );
 }

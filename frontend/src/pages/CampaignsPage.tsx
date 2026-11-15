@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api, getErrorMessage } from '../api';
 import ErrorBanner from '../components/ErrorBanner';
+import DataTable, { TableToolbar, type DataTableColumn } from '../components/DataTable';
+import { useTableFilters } from '../hooks/useTableFilters';
+import { BTN_PRIMARY, CARD_PAD, INPUT, NOTICE_INFO } from '../ui';
 
 type Campaign = {
   id: number;
@@ -70,10 +73,10 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_STYLES: Record<string, string> = {
-  isRunning: 'bg-blue-100 text-blue-700',
-  isBusy: 'bg-yellow-100 text-yellow-700',
-  isPosted: 'bg-green-100 text-green-700',
-  isScheduledFor: 'bg-slate-100 text-slate-600',
+  isRunning: 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-200',
+  isBusy: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-950/60 dark:text-yellow-200',
+  isPosted: 'bg-green-100 text-green-700 dark:bg-green-950/60 dark:text-green-200',
+  isScheduledFor: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
 };
 
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -383,31 +386,223 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
       .flatMap((b) => b.group_ids ?? []),
   ).size;
 
+  const campaignTargetText = (campaign: Campaign): string => {
+    const campaignBatches = batches.filter((batch) => (campaign.batch_ids ?? []).includes(batch.id));
+    if (campaign.campaign_type === 'product_group') {
+      if (campaign.target_scope === 'batch') {
+        return `${campaignBatches.map((batch) => batch.name).join(', ')} ${campaignBatches.length} batch(es)`;
+      }
+      if (campaign.target_scope === 'all') return 'All groups';
+      return groups.find((group) => group.id === campaign.group_id)?.name ?? '';
+    }
+    if (campaign.campaign_type === 'product_client') {
+      if (campaign.target_scope === 'all') return 'All clients';
+      const ids = campaign.client_ids && campaign.client_ids.length
+        ? campaign.client_ids
+        : campaign.client_id
+          ? [campaign.client_id]
+          : [];
+      return ids.map((id) => clients.find((client) => client.id === id)?.name ?? `#${id}`).join(', ');
+    }
+    return 'Non-core groups';
+  };
+
+  const typeOptions = Object.entries(TYPE_LABELS).map(([value, label]) => ({ value, label }));
+  const statusOptions = Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label }));
+
+  const table = useTableFilters<Campaign>(
+    campaigns,
+    (campaign) => {
+      const product = products.find((item) => item.id === campaign.product_id);
+      return [
+        campaign.name,
+        TYPE_LABELS[campaign.campaign_type] ?? campaign.campaign_type,
+        product?.name ?? (campaign.auto_product ? 'Auto product' : ''),
+        campaignTargetText(campaign),
+      ].filter(Boolean).join(' ');
+    },
+    [
+      { key: 'campaign', label: 'Campaign', getValue: (campaign) => campaign.name },
+      {
+        key: 'type',
+        label: 'Type',
+        type: 'select',
+        options: typeOptions,
+        getValue: (campaign) => campaign.campaign_type,
+      },
+      { key: 'target', label: 'Target', getValue: campaignTargetText },
+      {
+        key: 'schedule',
+        label: 'Schedule',
+        getValue: (campaign) => `${campaign.next_run_at ?? ''} ${repeatSummary(campaign)}`,
+      },
+      {
+        key: 'status',
+        label: 'Status',
+        type: 'select',
+        options: statusOptions,
+        getValue: (campaign) => campaign.status,
+      },
+    ],
+  );
+
+  const columns: DataTableColumn<Campaign>[] = [
+    {
+      key: 'campaign',
+      header: 'Campaign',
+      filter: { type: 'text', placeholder: 'Filter campaign' },
+      cell: (campaign) => {
+        const product = products.find((item) => item.id === campaign.product_id);
+        return (
+          <div>
+            <div className="font-medium">{campaign.name}</div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">{TYPE_LABELS[campaign.campaign_type] ?? campaign.campaign_type}</div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              {campaign.campaign_type === 'myGroupLink'
+                ? 'My groups with links'
+                : campaign.auto_product
+                  ? 'Auto product (equitable by category)'
+                  : `Product: ${product?.name ?? '—'}`}
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'type',
+      header: 'Type',
+      filter: { type: 'select', options: typeOptions, placeholder: 'All types' },
+      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cell: (campaign) => TYPE_LABELS[campaign.campaign_type] ?? campaign.campaign_type,
+    },
+    {
+      key: 'target',
+      header: 'Target',
+      filter: { type: 'text', placeholder: 'Filter target' },
+      cellClassName: 'text-xs text-slate-600 dark:text-slate-300',
+      cell: (campaign) => {
+        const campaignBatches = batches.filter((batch) => (campaign.batch_ids ?? []).includes(batch.id));
+        const campaignBatchGroupCount = new Set(campaignBatches.flatMap((batch) => batch.group_ids ?? [])).size;
+        if (campaign.campaign_type === 'product_group') {
+          if (campaign.target_scope === 'batch') {
+            return `${campaignBatches.map((batch) => batch.name).join(', ') || `${campaignBatches.length} batch(es)`} — ${campaignBatchGroupCount} groups from ${campaignBatches.length} batches${campaign.batch_size ? ` (${campaign.batch_size}/run)` : ''}`;
+          }
+          if (campaign.target_scope === 'all') return `All groups${campaign.batch_size ? ` (${campaign.batch_size}/run)` : ''}`;
+          return groups.find((group) => group.id === campaign.group_id)?.name ?? '—';
+        }
+        if (campaign.campaign_type === 'product_client') {
+          if (campaign.target_scope === 'all') return `All clients${campaign.batch_size ? ` (${campaign.batch_size}/run)` : ''}`;
+          return campaign.client_ids && campaign.client_ids.length
+            ? campaign.client_ids.map((id) => clients.find((client) => client.id === id)?.name ?? `#${id}`).join(', ')
+            : '—';
+        }
+        return 'Non-core groups';
+      },
+    },
+    {
+      key: 'schedule',
+      header: 'Schedule',
+      filter: { type: 'text', placeholder: 'Filter schedule' },
+      cellClassName: 'text-xs',
+      cell: (campaign) => (
+        <>
+          <div>{campaign.next_run_at ? `Next: ${campaign.next_run_at}` : 'Manual only'}</div>
+          <div className="text-slate-500 dark:text-slate-400">{repeatSummary(campaign)}</div>
+        </>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      filter: { type: 'select', options: statusOptions, placeholder: 'All statuses' },
+      cell: (campaign) => (
+        <span className={`rounded px-2 py-1 text-xs ${STATUS_STYLES[campaign.status] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+          {STATUS_LABELS[campaign.status] ?? campaign.status}
+        </span>
+      ),
+    },
+    {
+      key: 'sent',
+      header: 'Sent',
+      cell: (campaign) => campaign.posts_sent,
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      cell: (campaign) => (
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => startEdit(campaign)} className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/50">
+            Edit
+          </button>
+          <button
+            onClick={() => onOpenLive?.(campaign.id)}
+            className="rounded border border-sky-300 px-2 py-1 text-xs text-sky-700 hover:bg-sky-50 dark:border-sky-800 dark:text-sky-300 dark:hover:bg-sky-950/50"
+          >
+            Live
+          </button>
+          {campaign.status === 'isRunning' ? (
+            <button
+              onClick={() => stop(campaign.id)}
+              disabled={busyId === campaign.id}
+              className="rounded border border-orange-300 px-2 py-1 text-xs text-orange-700 hover:bg-orange-50 disabled:opacity-40 dark:border-orange-800 dark:text-orange-300 dark:hover:bg-orange-950/50"
+            >
+              {busyId === campaign.id ? 'Stopping…' : 'Stop'}
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => run(campaign.id)}
+                disabled={busyId === campaign.id}
+                className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/50"
+              >
+                {busyId === campaign.id ? 'Starting…' : campaign.status === 'isPosted' ? 'Run again' : 'Run now'}
+              </button>
+              <button
+                onClick={() => cancel(campaign.id)}
+                disabled={busyId === campaign.id}
+                className="rounded border border-amber-300 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50 disabled:opacity-40 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-950/50"
+              >
+                Cancel
+              </button>
+            </>
+          )}
+          <button
+            onClick={() => remove(campaign)}
+            disabled={busyId === campaign.id}
+            className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-40 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50"
+          >
+            Delete
+          </button>
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Campaigns</h1>
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
       {notice && (
-        <div className="flex items-start justify-between rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+        <div className={`flex items-start justify-between ${NOTICE_INFO}`}>
           <span>{notice}</span>
-          <button onClick={() => setNotice(null)} className="ml-4 text-blue-600 hover:text-blue-900">Dismiss</button>
+          <button onClick={() => setNotice(null)} className="ml-4 text-blue-600 hover:text-blue-900 dark:text-blue-300 dark:hover:text-blue-100">Dismiss</button>
         </div>
       )}
 
-      <div className="bg-white p-4 rounded-lg border shadow-sm">
+      <div className={CARD_PAD}>
         <form onSubmit={save} className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <input className="border rounded p-2" placeholder="Campaign name" value={name} onChange={(e) => setName(e.target.value)} />
-          <select className="border rounded p-2" value={type} onChange={(e) => changeType(e.target.value as typeof type)}>
+          <input className={INPUT} placeholder="Campaign name" value={name} onChange={(e) => setName(e.target.value)} />
+          <select className={INPUT} value={type} onChange={(e) => changeType(e.target.value as typeof type)}>
             <option value="product_group">Product → groups</option>
             <option value="product_client">Product → clients</option>
             <option value="myGroupLink">My group link → groups</option>
           </select>
           {type === 'myGroupLink' ? (
-            <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            <div className="rounded border border-slate-200 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
               Uses only “My groups” that have a link ({myGroupsWithLinks.length} ready). Core groups are skipped as targets.
             </div>
           ) : (
-            <div className="flex items-center gap-3 rounded border border-slate-200 px-3 py-2 text-sm">
+            <div className="flex items-center gap-3 rounded border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">
               <label className="flex items-center gap-2">
                 <input type="radio" checked={!autoProduct} onChange={() => setAutoProduct(false)} /> Fixed product
               </label>
@@ -418,7 +613,7 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
           )}
 
           {type !== 'myGroupLink' && !autoProduct && (
-            <select className="border rounded p-2" value={selProd ?? ''} onChange={(e) => setSelProd(e.target.value ? Number(e.target.value) : null)}>
+            <select className={INPUT} value={selProd ?? ''} onChange={(e) => setSelProd(e.target.value ? Number(e.target.value) : null)}>
               <option value="">Select product</option>
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -430,65 +625,65 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
 
           {type === 'product_group' && (
             <>
-              <select className="border rounded p-2" value={scope} onChange={(e) => setScope(e.target.value as 'single' | 'batch' | 'all')}>
+              <select className={INPUT} value={scope} onChange={(e) => setScope(e.target.value as 'single' | 'batch' | 'all')}>
                 <option value="single">Single group</option>
                 <option value="batch">Group batch(es)</option>
                 <option value="all">All groups (batched, no repeats)</option>
               </select>
               {scope === 'single' ? (
-                <select className="border rounded p-2" value={selGrp ?? ''} onChange={(e) => setSelGrp(e.target.value ? Number(e.target.value) : null)}>
+                <select className={INPUT} value={selGrp ?? ''} onChange={(e) => setSelGrp(e.target.value ? Number(e.target.value) : null)}>
                   <option value="">Select group</option>
                   {groups.filter((g) => g.is_active !== false).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                 </select>
               ) : scope === 'batch' ? (
-                <div className="md:col-span-2 rounded border border-slate-200 p-3 space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                <div className="space-y-2 rounded border border-slate-200 p-3 dark:border-slate-700 md:col-span-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
                     <span>Select one or more batches ({batchIds.length} selected)</span>
-                    <span className="font-medium text-slate-700">{selectedBatchGroupCount} unique group(s)</span>
+                    <span className="font-medium text-slate-700 dark:text-slate-200">{selectedBatchGroupCount} unique group(s)</span>
                   </div>
                   {batches.length === 0 ? (
-                    <div className="text-xs text-slate-400">Create group batches on the Groups page.</div>
+                    <div className="text-xs text-slate-400 dark:text-slate-500">Create group batches on the Groups page.</div>
                   ) : (
-                    <div className="max-h-40 overflow-y-auto rounded border border-slate-100 p-1">
+                    <div className="max-h-40 overflow-y-auto rounded border border-slate-100 p-1 dark:border-slate-700">
                       {batches.map((batch) => (
-                        <label key={batch.id} className="flex items-center justify-between gap-2 rounded px-1 py-0.5 text-sm hover:bg-slate-50">
+                        <label key={batch.id} className="flex items-center justify-between gap-2 rounded px-1 py-0.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">
                           <span className="flex items-center gap-2">
                             <input type="checkbox" checked={batchIds.includes(batch.id)} onChange={() => toggleBatch(batch.id)} />
                             <span>{batch.name}</span>
                           </span>
-                          <span className="text-xs text-slate-500">{batch.group_count} group(s)</span>
+                          <span className="text-xs text-slate-500 dark:text-slate-400">{batch.group_count} group(s)</span>
                         </label>
                       ))}
                     </div>
                   )}
-                  <label className="block text-xs text-slate-500">
+                  <label className="block text-xs text-slate-500 dark:text-slate-400">
                     Groups per batch (0 = all at once)
-                    <input className="mt-1 w-full border rounded p-2 text-sm" type="number" min="0" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
+                    <input className={`${INPUT} mt-1 w-full`} type="number" min="0" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
                   </label>
                 </div>
               ) : (
-                <input className="border rounded p-2" type="number" min="0" placeholder="Groups per batch (0 = all at once)" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
+                <input className={INPUT} type="number" min="0" placeholder="Groups per batch (0 = all at once)" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
               )}
             </>
           )}
 
           {type === 'product_client' && (
             <>
-              <select className="border rounded p-2" value={scope} onChange={(e) => setScope(e.target.value as 'single' | 'all')}>
+              <select className={INPUT} value={scope} onChange={(e) => setScope(e.target.value as 'single' | 'all')}>
                 <option value="single">Selected clients</option>
                 <option value="all">All clients (batched)</option>
               </select>
               {scope === 'single' ? (
-                <div className="md:col-span-2 rounded border border-slate-200 p-2">
-                  <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
+                <div className="rounded border border-slate-200 p-2 dark:border-slate-700 md:col-span-2">
+                  <div className="mb-1 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                     <span>Choose one or more clients ({clientIds.length} selected)</span>
                     <div className="flex gap-2">
-                      <button type="button" className="text-indigo-600 hover:underline" onClick={() => setClientIds(clients.map((c) => c.id))}>All</button>
-                      <button type="button" className="text-slate-500 hover:underline" onClick={() => setClientIds([])}>Clear</button>
+                      <button type="button" className="text-indigo-600 hover:underline dark:text-indigo-400" onClick={() => setClientIds(clients.map((c) => c.id))}>All</button>
+                      <button type="button" className="text-slate-500 hover:underline dark:text-slate-400" onClick={() => setClientIds([])}>Clear</button>
                     </div>
                   </div>
                   <div className="max-h-40 overflow-y-auto">
-                    {clients.length === 0 && <div className="text-xs text-slate-400">No clients yet.</div>}
+                    {clients.length === 0 && <div className="text-xs text-slate-400 dark:text-slate-500">No clients yet.</div>}
                     {clients.map((c) => (
                       <label key={c.id} className="flex items-center gap-2 py-0.5 text-sm">
                         <input type="checkbox" checked={clientIds.includes(c.id)} onChange={() => toggleClient(c.id)} />
@@ -497,14 +692,14 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
                     ))}
                   </div>
                   {clientIds.length > 1 && (
-                    <label className="mt-2 block text-xs text-slate-500">
+                    <label className="mt-2 block text-xs text-slate-500 dark:text-slate-400">
                       Clients per batch (0 = all at once)
-                      <input className="mt-1 w-full border rounded p-2 text-sm" type="number" min="0" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
+                      <input className={`${INPUT} mt-1 w-full`} type="number" min="0" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
                     </label>
                   )}
                 </div>
               ) : (
-                <input className="border rounded p-2" type="number" min="0" placeholder="Clients per batch (0 = all at once)" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
+                <input className={INPUT} type="number" min="0" placeholder="Clients per batch (0 = all at once)" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
               )}
             </>
           )}
@@ -513,48 +708,48 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
             <input type="checkbox" checked={rePost} onChange={(e) => setRePost(e.target.checked)} /> Re-post even if already posted
           </label>
 
-          <label className="text-xs text-slate-500 md:col-span-3">
+          <label className="text-xs text-slate-500 dark:text-slate-400 md:col-span-3">
             Start time (optional - leave empty for manual runs only)
-            <input className="mt-1 w-full border rounded p-2 text-sm" type="datetime-local" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} />
+            <input className={`${INPUT} mt-1 w-full`} type="datetime-local" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} />
           </label>
-          <label className="text-xs text-slate-500">
+          <label className="text-xs text-slate-500 dark:text-slate-400">
             Run window (minutes)
-            <input className="mt-1 w-full border rounded p-2 text-sm" type="number" min="5" value={duration} onChange={(e) => setDuration(e.target.value)} />
+            <input className={`${INPUT} mt-1 w-full`} type="number" min="5" value={duration} onChange={(e) => setDuration(e.target.value)} />
           </label>
 
-          <div className="md:col-span-3 rounded border border-slate-200 p-3">
+          <div className="rounded border border-slate-200 p-3 dark:border-slate-700 md:col-span-3">
             <label className="flex items-center gap-2 text-sm font-medium">
               <input type="checkbox" checked={repeatPost} onChange={(e) => setRepeatPost(e.target.checked)} /> Repeat this campaign
             </label>
             {repeatPost && (
               <div className="mt-2 grid grid-cols-1 md:grid-cols-4 gap-2">
-                <select className="border rounded p-2 text-sm" value={frequency} onChange={(e) => setFrequency(e.target.value)}>
+                <select className={INPUT} value={frequency} onChange={(e) => setFrequency(e.target.value)}>
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
                   <option value="monthly">Monthly</option>
                 </select>
                 {frequency === 'weekly' && (
-                  <select className="border rounded p-2 text-sm" value={repeatDay} onChange={(e) => setRepeatDay(e.target.value)}>
+                  <select className={INPUT} value={repeatDay} onChange={(e) => setRepeatDay(e.target.value)}>
                     {WEEKDAYS.map((day, index) => <option key={day} value={index}>{day}</option>)}
                   </select>
                 )}
                 {frequency === 'monthly' && (
-                  <input className="border rounded p-2 text-sm" type="number" min="1" max="31" placeholder="Day of month" value={repeatDay} onChange={(e) => setRepeatDay(e.target.value)} />
+                  <input className={INPUT} type="number" min="1" max="31" placeholder="Day of month" value={repeatDay} onChange={(e) => setRepeatDay(e.target.value)} />
                 )}
-                <label className="text-xs text-slate-500">
+                <label className="text-xs text-slate-500 dark:text-slate-400">
                   At
-                  <input className="mt-1 w-full border rounded p-2 text-sm" type="time" value={repeatTime} onChange={(e) => setRepeatTime(e.target.value)} />
+                  <input className={`${INPUT} mt-1 w-full`} type="time" value={repeatTime} onChange={(e) => setRepeatTime(e.target.value)} />
                 </label>
               </div>
             )}
           </div>
 
           <div className="md:col-span-3 flex gap-2">
-            <button className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50" disabled={saving || !name}>
+            <button className={BTN_PRIMARY} disabled={saving || !name}>
               {saving ? 'Saving…' : editingId ? 'Save changes' : 'Create campaign'}
             </button>
             {editingId && (
-              <button type="button" onClick={resetForm} className="border border-slate-300 px-4 py-2 rounded text-slate-600 hover:bg-slate-50">
+              <button type="button" onClick={resetForm} className="rounded border border-slate-300 px-4 py-2 text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800">
                 Cancel edit
               </button>
             )}
@@ -563,18 +758,18 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
       </div>
 
       {liveRun && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 dark:border-indigo-900/60 dark:bg-indigo-950/40 dark:text-indigo-200">
           <div className="flex flex-wrap items-center gap-3">
             <span className="inline-flex items-center gap-1.5 font-semibold">
               <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-indigo-500" />
               Live
             </span>
             <span>{liveRun.campaign_name ?? `Campaign ${liveRun.campaign_id}`}</span>
-            <span className="rounded bg-white/70 px-2 py-0.5 text-xs text-indigo-700">{liveRun.status}</span>
-            <span className="text-xs text-indigo-800">
+            <span className="rounded bg-white/70 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-200">{liveRun.status}</span>
+            <span className="text-xs text-indigo-800 dark:text-indigo-300">
               {liveRun.current_target ? `Now: ${liveRun.current_target.name}` : 'Waiting for the next target…'}
             </span>
-            <span className="text-xs text-indigo-700">
+            <span className="text-xs text-indigo-700 dark:text-indigo-300">
               {liveRun.counts.processed}/{liveRun.counts.total} processed · {liveRun.counts.sent} sent · {liveRun.counts.failed} missed · {liveRun.counts.skipped} skipped · {liveRun.counts.remaining} remaining
             </span>
           </div>
@@ -582,7 +777,7 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
             <button
               type="button"
               onClick={() => onOpenLive?.(liveRun.campaign_id)}
-              className="rounded border border-indigo-300 bg-white px-3 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+              className="rounded border border-indigo-300 bg-white px-3 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-slate-900 dark:text-indigo-300 dark:hover:bg-indigo-950/50"
             >
               Open live view
             </button>
@@ -590,7 +785,7 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
               type="button"
               onClick={skipLiveTarget}
               disabled={liveBusy || !liveRun.current_target}
-              className="rounded border border-amber-300 bg-white px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-40"
+              className="rounded border border-amber-300 bg-white px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-40 dark:border-amber-800 dark:bg-slate-900 dark:text-amber-300 dark:hover:bg-amber-950/50"
             >
               {liveBusy ? 'Skipping…' : 'Skip current'}
             </button>
@@ -598,115 +793,26 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
         </div>
       )}
 
-      <table className="w-full border-collapse border border-slate-200 rounded-lg">
-        <thead>
-          <tr className="bg-slate-100 text-left text-xs uppercase text-slate-500">
-            <th className="p-3 border-b">Campaign</th>
-            <th className="p-3 border-b">Target</th>
-            <th className="p-3 border-b">Schedule</th>
-            <th className="p-3 border-b">Status</th>
-            <th className="p-3 border-b">Sent</th>
-            <th className="p-3 border-b">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {campaigns.map((c) => {
-            const product = products.find((p) => p.id === c.product_id);
-            const group = groups.find((g) => g.id === c.group_id);
-            const campaignBatches = batches.filter((b) => (c.batch_ids ?? []).includes(b.id));
-            const campaignBatchGroupCount = new Set(campaignBatches.flatMap((b) => b.group_ids ?? [])).size;
-            return (
-              <tr key={c.id} className={`border-b hover:bg-slate-50 ${editingId === c.id ? 'bg-indigo-50/50' : ''}`}>
-                <td className="p-3">
-                  <div className="font-medium">{c.name}</div>
-                  <div className="text-xs text-slate-500">{TYPE_LABELS[c.campaign_type] ?? c.campaign_type}</div>
-                  <div className="text-xs text-slate-500">
-                    {c.campaign_type === 'myGroupLink'
-                      ? 'My groups with links'
-                      : c.auto_product
-                        ? 'Auto product (equitable by category)'
-                        : `Product: ${product?.name ?? '—'}`}
-                  </div>
-                </td>
-                <td className="p-3 text-xs text-slate-600">
-                  {c.campaign_type === 'product_group' && (
-                    c.target_scope === 'batch'
-                      ? `${campaignBatches.map((b) => b.name).join(', ') || `${campaignBatches.length} batch(es)`} — ${campaignBatchGroupCount} groups from ${campaignBatches.length} batches${c.batch_size ? ` (${c.batch_size}/run)` : ''}`
-                      : c.target_scope === 'all'
-                        ? `All groups${c.batch_size ? ` (${c.batch_size}/run)` : ''}`
-                        : group?.name ?? '—'
-                  )}
-                  {c.campaign_type === 'product_client' && (c.target_scope === 'all'
-                    ? `All clients${c.batch_size ? ` (${c.batch_size}/run)` : ''}`
-                    : (c.client_ids && c.client_ids.length
-                        ? c.client_ids.map((id) => clients.find((cl) => cl.id === id)?.name ?? `#${id}`).join(', ')
-                        : '—'))}
-                  {c.campaign_type === 'myGroupLink' && 'Non-core groups'}
-                </td>
-                <td className="p-3 text-xs">
-                  <div>{c.next_run_at ? `Next: ${c.next_run_at}` : 'Manual only'}</div>
-                  <div className="text-slate-500">{repeatSummary(c)}</div>
-                </td>
-                <td className="p-3">
-                  <span className={`px-2 py-1 rounded text-xs ${STATUS_STYLES[c.status] ?? 'bg-slate-100 text-slate-600'}`}>
-                    {STATUS_LABELS[c.status] ?? c.status}
-                  </span>
-                </td>
-                <td className="p-3">{c.posts_sent}</td>
-                <td className="p-3">
-                  <div className="flex flex-wrap gap-2">
-                    <button onClick={() => startEdit(c)} className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50">
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => onOpenLive?.(c.id)}
-                      className="rounded border border-sky-300 px-2 py-1 text-xs text-sky-700 hover:bg-sky-50"
-                    >
-                      Live
-                    </button>
-                    {c.status === 'isRunning' ? (
-                      <button
-                        onClick={() => stop(c.id)}
-                        disabled={busyId === c.id}
-                        className="rounded border border-orange-300 px-2 py-1 text-xs text-orange-700 hover:bg-orange-50 disabled:opacity-40"
-                      >
-                        {busyId === c.id ? 'Stopping…' : 'Stop'}
-                      </button>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => run(c.id)}
-                          disabled={busyId === c.id}
-                          className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
-                        >
-                          {busyId === c.id ? 'Starting…' : c.status === 'isPosted' ? 'Run again' : 'Run now'}
-                        </button>
-                        <button
-                          onClick={() => cancel(c.id)}
-                          disabled={busyId === c.id}
-                          className="rounded border border-amber-300 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50 disabled:opacity-40"
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    )}
-                    <button
-                      onClick={() => remove(c)}
-                      disabled={busyId === c.id}
-                      className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-40"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-          {campaigns.length === 0 && (
-            <tr><td colSpan={6} className="p-4 text-center text-slate-400">No campaigns yet.</td></tr>
-          )}
-        </tbody>
-      </table>
+      <section className="space-y-3">
+        <TableToolbar
+          search={table.search}
+          onSearch={table.setSearch}
+          placeholder="Search campaigns, products, or targets…"
+          count={table.count}
+          total={table.total}
+          onClear={table.clearFilters}
+          isFiltered={table.isFiltered}
+        />
+        <DataTable
+          columns={columns}
+          rows={table.filtered}
+          rowKey={(campaign) => campaign.id}
+          filters={table.values}
+          onFilterChange={table.setFilter}
+          emptyMessage={campaigns.length === 0 ? 'No campaigns yet.' : 'No campaigns match the current filters.'}
+          rowClassName={(campaign) => (editingId === campaign.id ? 'bg-indigo-50/60 dark:bg-indigo-950/30' : '')}
+        />
+      </section>
     </div>
   );
 }

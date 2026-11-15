@@ -13,6 +13,7 @@ cancel / "not now" style buttons. Anything containing leave / delete / remove
 
 from __future__ import annotations
 
+import base64
 import random
 import time
 from typing import List, Optional
@@ -120,17 +121,73 @@ SAFE_BUTTON_TEXTS = [
     "next",
 ]
 
-DANGEROUS_TEXTS = [
+# Popup bodies are *classified*, never patched-up: a dialog that looks like
+# it destroys data must not be clicked at all, and an unrecognised dialog is
+# unknown and therefore also untouched. Only a body carrying positive safe
+# markers may be reduced by a safe button.
+POPUP_DANGEROUS_MARKERS = [
     "leave group",
     "leave community",
-    "dismiss as admin",
-    "remove as admin",
+    "leave",
     "delete group",
+    "delete account",
     "delete",
     "remove",
+    "dismiss as admin",
+    "remove as admin",
+    "for everyone",
+    "permanently",
+    "discard",
     "confirm",
+    "proceed",
     "yes",
 ]
+
+POPUP_SAFE_MARKERS = [
+    "what's new",
+    "whats new",
+    "welcome",
+    "new features",
+    "get started",
+    "got it",
+    "maybe later",
+    "not now",
+    "dismiss",
+    "rate limit",
+    "limit reached",
+    "update available",
+    "backup",
+    "tip",
+]
+
+
+def classify_popup(text: str) -> str:
+    """Classify a WhatsApp dialog body.
+
+    Returns ``"dangerous"`` for anything that can hurt the account,
+    ``"safe"`` for a positively-identified dismissable information card, and
+    ``"unknown"`` otherwise. Both dangerous and unknown are left alone.
+    """
+    body = (text or "").lower()
+    if any(marker in body for marker in POPUP_DANGEROUS_MARKERS):
+        return "dangerous"
+    if any(marker in body for marker in POPUP_SAFE_MARKERS):
+        return "safe"
+    return "unknown"
+
+
+def popup_button_is_dangerous(label: str) -> bool:
+    """True when a button label contains any destructive marker."""
+    lower = (label or "").lower()
+    return any(marker in lower for marker in POPUP_DANGEROUS_MARKERS)
+
+
+def popup_button_is_safe(label: str) -> bool:
+    """True only for positively known dismissive button labels."""
+    lower = (label or "").strip().lower()
+    if not lower:
+        return False
+    return any(safe in lower for safe in SAFE_BUTTON_TEXTS)
 
 
 class WhatsAppBot:
@@ -209,6 +266,96 @@ class WhatsAppBot:
 
         self._wait_for_loading()
         self._wait_for_login(LOGIN_TIMEOUT)
+
+    # ── headless / QR helpers ────────────────────────────────────────────
+    def is_browser_closed(self) -> bool:
+        """True when the Playwright context no longer has any open page."""
+        context = self._browser
+        if context is None:
+            return True
+        try:
+            return len(context.pages) == 0
+        except Exception:
+            return True
+
+    def capture_qr(self) -> Optional[bytes]:
+        """Return PNG bytes of the QR region (or the page) when a QR is shown."""
+        page = self.page
+        if page is None:
+            return None
+        for selector in DISCONNECT_SELECTORS:
+            if not selector.startswith("canvas") and "qr" not in selector:
+                continue
+            try:
+                element = page.query_selector(selector)
+                if element and element.is_visible():
+                    return element.screenshot(type="png")
+            except Exception:
+                continue
+        try:
+            return page.screenshot(type="png")
+        except Exception:
+            return None
+
+    def qr_data_url(self) -> Optional[str]:
+        """Return the QR screenshot as a ``data:image/png;base64,…`` URL."""
+        png = self.capture_qr()
+        if not png:
+            return None
+        return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+
+    def switch_to_headed_for_qr(self) -> bool:
+        """Stop a headless session and relaunch a visible one for scanning."""
+        if not self.headless:
+            return True
+        try:
+            self.stop()
+        except Exception:
+            pass
+        self.headless = False
+        try:
+            self.start()
+            if self.page is not None:
+                try:
+                    self.page.goto(WHATSAPP_URL, wait_until="domcontentloaded", timeout=60000)
+                except Exception as exc:
+                    log("warning", f"visible browser could not load WhatsApp: {exc}", "whatsapp")
+                try:
+                    self._wait_for_loading(timeout=30)
+                except Exception:
+                    pass
+            update_connection_state(
+                "waiting_qr",
+                "Visible browser opened; scan the WhatsApp QR code",
+                qr_visible=True,
+            )
+            return True
+        except Exception as exc:
+            log("error", f"could not open a visible WhatsApp browser: {exc}", "whatsapp")
+            return False
+
+    def relaunch_headless(self) -> bool:
+        """Stop the visible browser and relaunch hidden, reusing the session."""
+        try:
+            self.stop()
+        except Exception:
+            pass
+        self.headless = True
+        try:
+            self.start()
+            if self.page is not None:
+                try:
+                    self.page.goto(WHATSAPP_URL, wait_until="domcontentloaded", timeout=60000)
+                except Exception as exc:
+                    log("warning", f"headless browser could not load WhatsApp: {exc}", "whatsapp")
+                try:
+                    self._wait_for_loading(timeout=30)
+                except Exception:
+                    pass
+            return True
+        except Exception as exc:
+            log("error", f"could not relaunch WhatsApp headless: {exc}", "whatsapp")
+            return False
 
     # ── public helpers ──────────────────────────────────────────────────
     def human_delay(self, low: Optional[float] = None, high: Optional[float] = None) -> None:
@@ -526,6 +673,14 @@ class WhatsAppBot:
                 return True
         return False
 
+    def dismiss_popups(self, handle_welcome: bool = True) -> int:
+        """Best-effort, classifier-gated popup dismissal.
+
+        Public so the poster can call it at action boundaries instead of
+        relying on Playwright's default dialog teardown.
+        """
+        return self._cancel_popups(handle_welcome=handle_welcome)
+
     def _cancel_popups(self, handle_welcome: bool = True) -> int:
         if not self.page:
             return 0
@@ -538,7 +693,14 @@ class WhatsAppBot:
                     if not popup.is_visible():
                         continue
                     text = (popup.inner_text() or "").lower()
-                    if any(danger in text for danger in DANGEROUS_TEXTS):
+                    kind = classify_popup(text)
+                    if kind != "safe":
+                        if kind == "dangerous":
+                            log(
+                                "info",
+                                "dangerous WhatsApp popup detected; leaving it untouched",
+                                "whatsapp",
+                            )
                         continue
                     if self._click_popup_safe_button(popup):
                         handled += 1
@@ -568,18 +730,16 @@ class WhatsAppBot:
                 label = (button.inner_text() or "").strip().lower()
                 if not label:
                     continue
-                if any(danger in label for danger in DANGEROUS_TEXTS):
+                if popup_button_is_dangerous(label):
+                    # Never click destructive buttons, not even to “close”.
                     continue
-                if any(safe in label for safe in SAFE_BUTTON_TEXTS):
+                if popup_button_is_safe(label):
                     button.click()
                     return True
         except Exception:
             pass
-        try:
-            self.page.keyboard.press("Escape")
-            return True
-        except Exception:
-            return False
+        # Unknown/non-dismissable popups are deliberately left open.
+        return False
 
     def get_stats(self) -> dict:
         return {

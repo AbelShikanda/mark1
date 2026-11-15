@@ -28,6 +28,25 @@ SETTINGS: List[Dict[str, Any]] = [
         "unit": "runs",
     },
     {
+        "key": "headless",
+        "label": "Run browser headless",
+        "description": "Hide the Chrome window. QR codes are shown in the dashboard by default; a visible browser is available as a fallback.",
+        "type": "bool",
+        "default": False,
+        "category": "Session",
+    },
+    {
+        "key": "retention_days",
+        "label": "Keep logs and run history for",
+        "description": "Delete logs, finished run history and debug files older than this many days. Analytics, campaign posts and all configuration are never deleted.",
+        "type": "int",
+        "default": 30,
+        "min": 1,
+        "max": 3650,
+        "category": "Data",
+        "unit": "days",
+    },
+    {
         "key": "max_group_misses",
         "label": "Silence group after consecutive misses",
         "description": "How many misses in a row a group may have before it is silenced and skipped by campaigns.",
@@ -278,6 +297,13 @@ def get_float(key: str, default: float = 0.0) -> float:
         return float(get_setting(key, default))
     except (TypeError, ValueError):
         return default
+
+
+def get_bool(key: str, default: bool = False) -> bool:
+    value = get_setting(key, default)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
 # ── non-schema app_meta counters ────────────────────────────────────────

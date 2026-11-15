@@ -24,9 +24,11 @@ from bot import (
     check_schedule_conflicts, run_due_schedules, due_campaigns,
     sync_all_campaigns, defer_campaign,
     reset_products_if_all_posted,
+    session_qr, show_browser, use_headless,
 )
 from bot import run_state
 from bot import settings as app_settings
+from bot import maintenance
 from bot.live_state import get_connection_state
 from bot.campaign_runner import (
     get_max_group_misses,
@@ -57,6 +59,12 @@ async def lifespan(_: FastAPI):
         os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", playwright_dir)
     sync_all_campaigns()
     maybe_seed_groups()
+    try:
+        # Short-lived hosts and first-run installs still benefit: this only
+        # deletes operational history older than the retention window.
+        maintenance.maybe_retention_cleanup(app_settings.get_int("retention_days", 30))
+    except Exception as exc:
+        log("error", f"startup retention cleanup failed: {exc}", "maintenance")
     start_scheduler()
     yield
     _scheduler_stop.set()
@@ -117,6 +125,12 @@ def start_scheduler():
                 run_due_schedules()
             except Exception as e:
                 log("error", f"scheduler tick error: {e}", "scheduler")
+            try:
+                maintenance.maybe_retention_cleanup(
+                    app_settings.get_int("retention_days", 30)
+                )
+            except Exception as e:
+                log("error", f"retention cleanup error: {e}", "maintenance")
             _scheduler_stop.wait(5)
 
     _scheduler_thread = threading.Thread(target=loop, daemon=True)
@@ -941,6 +955,53 @@ def get_session_status():
 @app.post("/session/reset")
 def reset_saved_session():
     return reset_session()
+
+
+@app.get("/session/qr")
+def get_session_qr():
+    return session_qr()
+
+
+@app.post("/session/show-browser")
+def show_session_browser():
+    return show_browser()
+
+
+@app.post("/session/use-headless")
+def use_session_headless():
+    return use_headless()
+
+
+# ── maintenance ─────────────────────────────────────────────────────────
+@app.get("/maintenance/stats")
+def get_maintenance_stats():
+    return maintenance.stats()
+
+
+@app.post("/maintenance/clear-logs")
+def clear_maintenance_logs():
+    return maintenance.clear_logs()
+
+
+@app.post("/maintenance/clear-runs")
+def clear_maintenance_runs():
+    return maintenance.clear_finished_runs()
+
+
+@app.post("/maintenance/clear-debug")
+def clear_maintenance_debug():
+    return maintenance.clear_debug_files()
+
+
+@app.post("/maintenance/clear-all")
+def clear_maintenance_all():
+    return maintenance.clear_all_safe()
+
+
+@app.post("/maintenance/cleanup-now")
+def run_retention_cleanup_now():
+    days = app_settings.get_int("retention_days", 30)
+    return maintenance.retention_cleanup(days)
 
 
 # ── schedules ───────────────────────────────────────────────────────────
