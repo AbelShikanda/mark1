@@ -359,6 +359,7 @@ class LiveDbPayload(BaseModel):
 FEEDBACK_TYPES = ("bug", "improvement", "other")
 FEEDBACK_SEVERITIES = ("low", "medium", "high", "critical")
 FEEDBACK_STATUSES = ("new", "triaged", "done")
+FEEDBACK_TRIAGES = ("accepted", "needs-info", "duplicate", "wontfix", "not-a-bug")
 
 
 class FeedbackBase(BaseModel):
@@ -413,8 +414,29 @@ class FeedbackBase(BaseModel):
 class Feedback(FeedbackBase):
     id: Optional[int] = None
     status: str = "new"
+    triage: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+    @field_validator("status")
+    @classmethod
+    def _status(cls, value: str) -> str:
+        text = str(value or "").strip().lower()
+        if text not in FEEDBACK_STATUSES:
+            raise ValueError(f"status must be one of {', '.join(FEEDBACK_STATUSES)}")
+        return text
+
+    @field_validator("triage", mode="before")
+    @classmethod
+    def _triage(cls, value):
+        if value is None:
+            return None
+        text = str(value).strip().lower()
+        if text == "":
+            return None
+        if text not in FEEDBACK_TRIAGES:
+            raise ValueError(f"triage must be one of {', '.join(FEEDBACK_TRIAGES)}")
+        return text
 
 
 class FeedbackInput(FeedbackBase):
@@ -423,6 +445,7 @@ class FeedbackInput(FeedbackBase):
 
 class FeedbackUpdate(BaseModel):
     status: str
+    triage: Optional[str] = None
 
     @field_validator("status")
     @classmethod
@@ -430,4 +453,16 @@ class FeedbackUpdate(BaseModel):
         text = str(value or "").strip().lower()
         if text not in FEEDBACK_STATUSES:
             raise ValueError(f"status must be one of {', '.join(FEEDBACK_STATUSES)}")
+        return text
+
+    @field_validator("triage", mode="before")
+    @classmethod
+    def _triage(cls, value):
+        if value is None:
+            return None
+        text = str(value).strip().lower()
+        if text == "":
+            return None
+        if text not in FEEDBACK_TRIAGES:
+            raise ValueError(f"triage must be one of {', '.join(FEEDBACK_TRIAGES)}")
         return text

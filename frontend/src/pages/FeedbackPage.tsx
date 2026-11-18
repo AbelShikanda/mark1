@@ -18,10 +18,23 @@ type FeedbackEntry = {
   expected: string | null;
   actual: string | null;
   recommended: string | null;
+  triage: string | null;
   screenshots: string[];
   status: FeedbackStatus;
   created_at: string | null;
 };
+
+const TRIAGE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'accepted', label: 'Triaged · Accepted (queued)' },
+  { value: 'needs-info', label: 'Needs information' },
+  { value: 'duplicate', label: 'Duplicate' },
+  { value: 'wontfix', label: "Won't fix" },
+  { value: 'not-a-bug', label: 'Not a bug' },
+];
+
+const TRIAGE_LABELS: Record<string, string> = Object.fromEntries(
+  TRIAGE_OPTIONS.map((option) => [option.value, option.label]),
+);
 
 const TYPE_LABEL: Record<FeedbackType, string> = {
   bug: 'Bug',
@@ -60,6 +73,7 @@ function buildMarkdown(entry: FeedbackEntry): string {
     `**Feedback ID:** #${entry.id}`,
     `**Severity:** ${entry.severity}`,
     `**Status:** ${entry.status}`,
+    ...(entry.triage?.trim() ? [`**Triage:** ${TRIAGE_LABELS[entry.triage] ?? entry.triage}`] : []),
     `**Environment:** Marketing Bot v0.3.0 · Windows · submitted ${entry.created_at ?? 'unknown'}`,
     '',
     '### Description',
@@ -219,13 +233,20 @@ export default function FeedbackPage() {
     }
   };
 
-  const setStatus = async (entry: FeedbackEntry, status: FeedbackStatus) => {
+  const setStatus = async (entry: FeedbackEntry, status: FeedbackStatus, triage?: string) => {
     setBusyId(entry.id);
     try {
-      await api.patch(`/feedback/${entry.id}`, { status });
-      setEntries((prev) => prev.map((item) => (item.id === entry.id ? { ...item, status } : item)));
+      const payload: Record<string, unknown> = { status };
+      if (triage !== undefined) payload.triage = triage;
+      await api.patch(`/feedback/${entry.id}`, payload);
+      setEntries((prev) =>
+        prev.map((item) =>
+          item.id === entry.id
+            ? { ...item, status, triage: status === 'new' ? null : triage ?? item.triage }
+            : item,
+        ),
+      );
       if (status === 'done') {
-        // Collapse the card to just the title once it's done.
         setCollapsed((prev) => new Set(prev).add(entry.id));
       }
     } catch (err) {
@@ -444,8 +465,15 @@ export default function FeedbackPage() {
                         </span>
                         <h3 className="text-sm font-semibold leading-snug text-slate-800 dark:text-[#e5e5e5]">{entry.title}</h3>
                       </span>
-                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${STATUS_STYLE[entry.status]}`}>
-                        {entry.status}
+                      <span className="flex shrink-0 items-center gap-1.5">
+                        {entry.triage && (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+                            {TRIAGE_LABELS[entry.triage] ?? entry.triage}
+                          </span>
+                        )}
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${STATUS_STYLE[entry.status]}`}>
+                          {entry.status}
+                        </span>
                       </span>
                     </button>
 
@@ -479,9 +507,21 @@ export default function FeedbackPage() {
                             Edit
                           </button>
                           {entry.status !== 'triaged' && (
-                            <button type="button" onClick={() => setStatus(entry, 'triaged')} disabled={busyId === entry.id} className={`${ACTION_BTN} border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-900 dark:text-amber-300 dark:hover:bg-amber-950/40`}>
-                              Mark triaged
-                            </button>
+                            <select
+                              value=""
+                              disabled={busyId === entry.id}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                if (value) setStatus(entry, 'triaged', value);
+                              }}
+                              aria-label="Set triage outcome"
+                              className={`${ACTION_BTN} border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-900 dark:text-amber-300 dark:hover:bg-amber-950/40`}
+                            >
+                              <option value="">Mark triaged…</option>
+                              {TRIAGE_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
                           )}
                           {entry.status !== 'done' && (
                             <button type="button" onClick={() => setStatus(entry, 'done')} disabled={busyId === entry.id} className={`${ACTION_BTN} border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900 dark:text-emerald-300 dark:hover:bg-emerald-950/40`}>

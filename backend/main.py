@@ -918,9 +918,11 @@ def update_feedback(fid: int, payload: FeedbackUpdate):
     rows = query("SELECT id FROM feedback WHERE id = ?", (fid,))
     if not rows:
         raise HTTPException(status_code=404, detail="feedback not found")
+    # Reopening (back to new) clears the triage outcome.
+    triage_value = None if payload.status == "new" else payload.triage
     execute(
-        "UPDATE feedback SET status = ?, updated_at = datetime('now') WHERE id = ?",
-        (payload.status, fid),
+        "UPDATE feedback SET status = ?, triage = ?, updated_at = datetime('now') WHERE id = ?",
+        (payload.status, triage_value, fid),
     )
     return _feedback_row(query("SELECT * FROM feedback WHERE id = ?", (fid,))[0])
 
