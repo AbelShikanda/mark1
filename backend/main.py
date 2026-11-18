@@ -950,7 +950,12 @@ def create_market_report(payload: Optional[dict] = None):
         days = max(1, min(3650, int(payload.get("days", 7))))
     except (TypeError, ValueError):
         days = 7
-    report = reports.create_report(title, days=days, trigger="manual")
+    campaign_id = payload.get("campaign_id")
+    try:
+        campaign_id = int(campaign_id) if campaign_id not in (None, "", "all") else None
+    except (TypeError, ValueError):
+        campaign_id = None
+    report = reports.create_report(title, days=days, trigger="manual", campaign_id=campaign_id)
     if not report:
         raise HTTPException(status_code=500, detail="report was not persisted")
     return report

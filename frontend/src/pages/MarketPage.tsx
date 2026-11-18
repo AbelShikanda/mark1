@@ -16,6 +16,7 @@ type ReportRow = {
 type ReportDetail = ReportRow & {
   body: {
     period: { from: string; to: string };
+    scope_campaign_id?: number | null;
     summary: Record<string, number>;
     intents: Record<string, number>;
     sentiments: Record<string, number>;
@@ -76,6 +77,7 @@ function bar(label: string, value: number, max: number, tone = 'bg-indigo-500') 
 
 export default function MarketPage() {
   const [tab, setTab] = useState<'reports' | 'review' | 'unclassified' | 'vault'>('reports');
+  const [campaigns, setCampaigns] = useState<Array<{ id: number; name: string }>>([]);
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [selected, setSelected] = useState<ReportDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -83,6 +85,7 @@ export default function MarketPage() {
   const [unclassified, setUnclassified] = useState<ReviewRow[]>([]);
   const [vault, setVault] = useState<VaultRow[]>([]);
   const [days, setDays] = useState('7');
+  const [scope, setScope] = useState('all');
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -108,6 +111,9 @@ export default function MarketPage() {
 
   useEffect(() => {
     load();
+    api.get<Array<{ id: number; name: string }>>('/campaigns')
+      .then((res) => setCampaigns(Array.isArray(res.data) ? res.data : []))
+      .catch(() => setCampaigns([]));
   }, []);
 
   const openReport = async (id: number) => {
@@ -127,7 +133,10 @@ export default function MarketPage() {
     setError(null);
     setNotice(null);
     try {
-      const res = await api.post<ReportDetail>('/market/reports', { days: parseInt(days, 10) || 7 });
+      const res = await api.post<ReportDetail>('/market/reports', {
+        days: parseInt(days, 10) || 7,
+        campaign_id: scope === 'all' ? 'all' : parseInt(scope, 10),
+      });
       setNotice('Report generated.');
       setSelected(res.data);
       await load();
@@ -228,6 +237,12 @@ export default function MarketPage() {
           <div className={`${PANEL} p-4`}>
             <h2 className="text-sm font-semibold">Reports</h2>
             <div className="mt-2 flex flex-wrap items-center gap-2">
+              <select className={INPUT} value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Scope">
+                <option value="all">All campaigns</option>
+                {campaigns.map((campaign) => (
+                  <option key={campaign.id} value={String(campaign.id)}>{campaign.name}</option>
+                ))}
+              </select>
               <select className={INPUT} value={days} onChange={(e) => setDays(e.target.value)} aria-label="Period">
                 <option value="7">Last 7 days</option>
                 <option value="30">Last 30 days</option>
@@ -280,9 +295,15 @@ export default function MarketPage() {
                   </div>
                 </div>
 
+                {((detail.summary.posts_with_capture ?? 0) === 0 || detail.summary.replies_captured === 0) && (
+                  <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+                    No reply data captured yet. Enable <strong>Capture replies after sending</strong> on a campaign, run it, then regenerate — reply-derived sections below will fill in.
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {[
-                    ['Posts sent', detail.summary.posts_sent],
+                    ['Posts sent', `${detail.summary.posts_sent} (${detail.summary.posts_with_capture} cap)`],
                     ['Replies', detail.summary.replies_captured],
                     ['Msgs / post', detail.summary.messages_per_post],
                     ['Spam flagged', detail.summary.spam_flagged],
@@ -296,15 +317,21 @@ export default function MarketPage() {
 
                 <section>
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-[#a3a3a3]">Best time</h3>
-                  <p className="mt-1 text-xs text-slate-600 dark:text-[#a3a3a3]">
-                    {bestHour !== null && bestHour !== undefined ? `Best hour of day: ${bestHour}:00` : 'Not enough data yet'}
-                    {weekday ? ` · best weekday: ${weekday}` : ''}
-                  </p>
-                  <div className="mt-1 space-y-1">
-                    {Object.entries(detail.best_hour_replies ?? {})
-                      .sort(([a], [b]) => Number(a) - Number(b))
-                      .map(([hour, replies]) => bar(`${hour}:00`, Number(replies), maxHour, 'bg-emerald-500'))}
-                  </div>
+                  {bestHour === null || bestHour === undefined ? (
+                    <p className="mt-1 text-xs text-slate-500 dark:text-[#a3a3a3]">Not enough captured reply data yet — nothing to rank.</p>
+                  ) : (
+                    <>
+                      <p className="mt-1 text-xs text-slate-600 dark:text-[#a3a3a3]">
+                        Best hour of day: {bestHour}:00
+                        {weekday ? ` · best weekday: ${weekday}` : ''}
+                      </p>
+                      <div className="mt-1 space-y-1">
+                        {Object.entries(detail.best_hour_replies ?? {})
+                          .sort(([a], [b]) => Number(a) - Number(b))
+                          .map(([hour, replies]) => bar(`${hour}:00`, Number(replies), maxHour, 'bg-emerald-500'))}
+                      </div>
+                    </>
+                  )}
                 </section>
 
                 <section>

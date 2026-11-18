@@ -18,17 +18,26 @@ MSG_CONTAINERS = [
     'div[data-testid="msg-container"]',
     '#main div[data-testid="msg-container"]',
     'div[data-testid="msg-own"]',
+    '#main div[role="row"]',
+    '#main div[data-testid="msg-not-for-me"]',
+    '#main li[data-testid^="message-"]',
 ]
 MSG_TEXT = [
     'div[data-testid="message-text"]',
     '#main div[data-testid="message-text"]',
     'div[data-testid="message-caption"]',
+    'div[data-testid="caption"]',
+    'div[data-testid="msg-text"] > div',
+    'span[data-testid="selectable-text"]',
+    '#main span[data-testid="selectable-text"]',
 ]
 MSG_AUTHOR = [
     'div[data-testid="msg-author"]',
     '#main div[data-testid="msg-author"]',
     'span[data-testid="quoted-msg-title"]',
+    'div[data-testid="msg-author-link"]',
 ]
+MSG_TEXT_ROW = '#main div[data-testid="message-text"], #main div[data-testid="message-caption"], #main span[data-testid="selectable-text"]'
 OWN_MARKERS = ['div[data-testid="msg-own"]']
 
 LINK_RE = re.compile(r"(?i)(?:https?://)?(?:www\.)?(chat\.whatsapp\.com/[A-Za-z0-9]{8,})", re.IGNORECASE)
@@ -82,17 +91,39 @@ def _scrape_visible(page, limit: int = 40) -> List[Dict[str, Any]]:
                 break
         except Exception:
             containers = []
-    if not containers:
-        return []
+    if containers:
+        rows = _rows_from_containers(page, containers, limit)
+        if rows:
+            return rows
 
+    # Human fallback: walk message text elements directly, and find each one's
+    # owning row so we can still attribute sender/row across WhatsApp builds.
+    try:
+        texts = page.query_selector_all(MSG_TEXT_ROW)
+    except Exception:
+        texts = []
+    rows: List[Dict[str, Any]] = []
+    for text_el in texts:
+        if len(rows) >= limit:
+            break
+        try:
+            text = (text_el.inner_text() or "").replace("\n", " ").strip()
+            if not text or len(text) > 2000:
+                continue
+            sender = _sender_from_text_el(page, text_el)
+            rows.append({"sender": sender, "text": text})
+        except Exception:
+            continue
+    return rows
+
+
+def _rows_from_containers(page, containers, limit: int) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for container in containers:
         if len(rows) >= limit:
             break
         try:
-            text_el = container.query_selector("div[data-testid=\"message-text\"]")
-            if not text_el:
-                text_el = container.query_selector("div[data-testid=\"message-caption\"]")
+            text_el = container.query_selector("div[data-testid=\"message-text\"], div[data-testid=\"message-caption\"], span[data-testid=\"selectable-text\"]")
             if not text_el:
                 continue
             text = (text_el.inner_text() or "").replace("\n", " ").strip()
@@ -103,6 +134,28 @@ def _scrape_visible(page, limit: int = 40) -> List[Dict[str, Any]]:
         except Exception:
             continue
     return rows
+
+
+def _sender_from_text_el(page, text_el) -> str:
+    # Walk up the DOM looking for an author row or our own marker.
+    try:
+        result = page.evaluate(
+            """(el) => {
+                let cur = el;
+                for (let depth = 0; depth < 8 && cur; depth += 1) {
+                    const t = (cur.getAttribute && (cur.getAttribute('data-testid') || '')) || '';
+                    if (t.includes('msg-own')) return 'Me';
+                    const author = cur.querySelector && cur.querySelector('[data-testid="msg-author"]');
+                    if (author && author.innerText && author.innerText.trim()) return author.innerText.trim().slice(0, 120);
+                    cur = cur.parentElement;
+                }
+                return 'unknown';
+            }""",
+            text_el,
+        )
+        return str(result)[:120] if result else 'unknown'
+    except Exception:
+        return 'unknown'
 
 
 def normalize_link(link: str) -> Optional[str]:
@@ -136,6 +189,17 @@ def capture_post_replies(
         return 0
     dwell = max(0, min(600, int(campaign_row.get("capture_dwell_seconds") or 0)))
 
+    def _emit(level: str, event_type: str, message: str) -> None:
+        if run_id is None:
+            return
+        try:
+            from . import run_state
+            run_state.record_event(run_id, level, event_type, message, campaign_id=campaign_id)
+        except Exception:
+            pass
+
+    _emit("info", "capture_started", f"capture enabled; waiting {dwell}s after send")
+
     # Cancel-aware dwell: stay out of the way of Stop.
     elapsed = 0.0
     while elapsed < dwell:
@@ -143,16 +207,22 @@ def capture_post_replies(
         elapsed += 0.5
         try:
             if bot is not None and bot.cancel_event is not None and bot.cancel_event.is_set():
+                _emit("warning", "capture_cancelled", "capture aborted (run cancelled)")
                 return 0
         except Exception:
+            _emit("warning", "capture_cancelled", "capture aborted (run cancelled)")
             return 0
 
     page = getattr(bot, "page", None)
     if page is None:
+        _emit("error", "capture_failed", "capture skipped: browser page not available")
         return 0
 
     rows = _scrape_visible(page, limit=40)
     if not rows:
+        _emit("warning", "capture_empty", "capture found no messages in this chat (selectors did not match or no new traffic yet)")
+        log("warning", f"campaign {campaign_id}: capture scraped 0 messages "
+                        f"(URL={getattr(page, 'url', 'unknown')})", "capture")
         return 0
 
     stored = 0
@@ -222,6 +292,9 @@ def capture_post_replies(
     conn.close()
     if stored:
         log("info", f"captured {stored} message(s) in group {group_id} after post {post_id}", "capture")
+        _emit("info", "capture_stored", f"captured {stored} message(s) from the chat (own messages skipped)")
+    else:
+        _emit("info", "capture_stored", "capture ran but stored no new messages (only own/duplicate messages found)")
     return stored
 
 

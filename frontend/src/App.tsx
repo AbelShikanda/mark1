@@ -92,7 +92,7 @@ const DEFAULT_CONNECTION_POLL_MS = 5000;
 const CONNECTION_POLL_SETTING = 'connection_poll_ms';
 
 export default function App() {
-  const [page, setPage] = useState<Page>('products');
+  const [page, setPage] = useState<Page>('market');
   const [liveCampaignId, setLiveCampaignId] = useState<number | null>(null);
   const [connection, setConnection] = useState<Connection | null>(null);
   const [connectionOffline, setConnectionOffline] = useState(false);

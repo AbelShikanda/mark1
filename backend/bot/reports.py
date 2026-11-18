@@ -37,6 +37,7 @@ def csv_of(report: Dict[str, Any]) -> str:
     body = report.get("body") or {}
     summary = body.get("summary") or {}
     rows = [("section", "key", "value")]
+    rows.append(("scope", "campaign_id", body.get("scope_campaign_id") if body.get("scope_campaign_id") is not None else "all"))
     rows += [("summary", k, v) for k, v in summary.items()]
     rows += [("intent", k, v) for k, v in (body.get("intents") or {}).items()]
     rows += [("sentiment", k, v) for k, v in (body.get("sentiments") or {}).items()]
@@ -125,23 +126,38 @@ def pdf_of(report: Dict[str, Any]) -> bytes:
     return buffer.getvalue()
 
 
-def aggregate(from_ts: str, to_ts: str) -> Dict[str, Any]:
+def aggregate(from_ts: str, to_ts: str, campaign_id: Optional[int] = None) -> Dict[str, Any]:
     conn = get_conn()
+    post_where = "WHERE cp.status = 'sent' AND cp.posted_at >= ? AND cp.posted_at < ?"
+    params: List[Any] = [from_ts, to_ts]
+    if campaign_id is not None:
+        post_where += " AND cp.campaign_id = ?"
+        params.append(int(campaign_id))
     posts = _rows(
         conn,
         "SELECT cp.id, cp.campaign_id, cp.target_id, cp.target_name, cp.posted_at, cp.status, "
-        "       cp.product_id, c.name AS campaign_name, p.name AS product_name "
+        "       cp.product_id, c.name AS campaign_name, p.name AS product_name, "
+        "       COALESCE(c.capture_replies, 0) AS capture_boost "
         "FROM campaign_posts cp LEFT JOIN campaigns c ON c.id = cp.campaign_id "
         "LEFT JOIN products p ON p.id = cp.product_id "
-        "WHERE cp.status = 'sent' AND cp.posted_at >= ? AND cp.posted_at < ?",
-        (from_ts, to_ts),
+        + post_where,
+        tuple(params),
     )
+    msg_params: List[Any] = [from_ts, to_ts]
+    if campaign_id is not None:
+        msg_where = (
+            "WHERE m.captured_at >= ? AND m.captured_at < ? "
+            "AND (m.campaign_post_id IN (SELECT id FROM campaign_posts WHERE campaign_id = ?))"
+        )
+        msg_params.append(int(campaign_id))
+    else:
+        msg_where = "WHERE m.captured_at >= ? AND m.captured_at < ?"
     messages = _rows(
         conn,
         "SELECT m.id, m.group_id, m.campaign_post_id, m.sender, m.text, m.captured_at, "
         "       m.intent, m.sentiment, m.topics, m.spam_flag "
-        "FROM group_messages m WHERE m.captured_at >= ? AND m.captured_at < ?",
-        (from_ts, to_ts),
+        "FROM group_messages m " + msg_where,
+        tuple(msg_params),
     )
     groups = {row["id"]: row for row in _rows(conn, "SELECT id, name FROM groups")}
     products = {row["id"]: row for row in _rows(conn, "SELECT id, name FROM products")}
@@ -149,6 +165,7 @@ def aggregate(from_ts: str, to_ts: str) -> Dict[str, Any]:
 
     post_counts: Dict[str, Any] = {}
     reply_counts: Dict[int, int] = {}
+    posts_with_capture = sum(1 for p in posts if p.get("capture_boost"))
     for message in messages:
         pid = message.get("campaign_post_id")
         if pid is not None:
@@ -215,8 +232,16 @@ def aggregate(from_ts: str, to_ts: str) -> Dict[str, Any]:
         return max(d.items(), key=lambda item: item[1])[0]
 
     top_questions = top_keywords(question_texts, limit=25)
+    total_replies = len(messages)
+    if total_replies == 0:
+        best_hour = None
+        best_weekday = None
+    else:
+        best_hour = best_key(by_hour)
+        best_weekday = best_key(by_weekday)
     summary = {
         "posts_sent": len(posts),
+        "posts_with_capture": posts_with_capture,
         "replies_captured": len(messages),
         "messages_per_post": round(len(messages) / len(posts), 2) if posts else 0.0,
         "groups_reached": len({p["target_id"] for p in posts if p.get("target_id") is not None}),
@@ -225,14 +250,15 @@ def aggregate(from_ts: str, to_ts: str) -> Dict[str, Any]:
     }
     return {
         "period": {"from": from_ts, "to": to_ts},
+        "scope_campaign_id": campaign_id,
         "summary": summary,
         "intents": intent_counts,
         "sentiments": sentiment_counts,
         "top_keywords": top_keywords(texts, limit=25),
         "top_questions": top_questions,
         "group_stats": sorted(group_stats.values(), key=lambda g: (-g["replies"], -g["posts"])),
-        "best_hour": best_key(by_hour),
-        "best_weekday": best_key(by_weekday),
+        "best_hour": best_hour,
+        "best_weekday": best_weekday,
         "best_hour_replies": by_hour,
         "best_weekday_replies": by_weekday,
         "product_stats": product_stats,
@@ -245,13 +271,14 @@ def build_summary_md(aggregate_body: Dict[str, Any]) -> str:
     lines = [
         f"# Market report ({body['period']['from'][:10]} → {body['period']['to'][:10]})",
         "",
-        f"- Posts sent: **{body['summary']['posts_sent']}**",
+        f"- Posts sent: **{body['summary']['posts_sent']}** (with capture: **{body['summary'].get('posts_with_capture', 0)}**)",
         f"- Replies captured: **{body['summary']['replies_captured']}**",
         f"- Messages per post: **{body['summary']['messages_per_post']}**",
         f"- Groups reached: **{body['summary']['groups_reached']}**",
         f"- Spam flagged: **{body['summary']['spam_flagged']}**",
         f"- Unclassified: **{body['summary']['unclassified']}**",
-        f"- Best hour: **{body['best_hour']}**, best weekday: **{body['best_weekday']}**",
+        f"- Best hour: **{body['best_hour'] if body['best_hour'] is not None else 'not enough data'}"
+        + (f" · best weekday: **{body['best_weekday']}**" if body['best_weekday'] else ""),
         "",
         "## Intent distribution",
     ]
@@ -278,10 +305,16 @@ def build_summary_md(aggregate_body: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def create_report(title: str, days: int = 7, trigger: str = "manual") -> Dict[str, Any]:
+def create_report(title: str, days: int = 7, trigger: str = "manual", campaign_id: Optional[int] = None) -> Dict[str, Any]:
     to_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     from_ts = _cutoff_days(days)
-    body = aggregate(from_ts, to_ts)
+    if campaign_id is not None:
+        conn = get_conn()
+        row = conn.execute("SELECT name FROM campaigns WHERE id = ?", (int(campaign_id),)).fetchone()
+        conn.close()
+        campaign_name = row["name"] if row else f"campaign {campaign_id}"
+        title = title or f"{campaign_name} — last {days} days"
+    body = aggregate(from_ts, to_ts, campaign_id)
     summary_md = build_summary_md(body)
     conn = get_conn()
     cur = conn.execute(
