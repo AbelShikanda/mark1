@@ -30,18 +30,18 @@ type Page =
   | 'market';
 
 const ICONS: Record<Page, string> = {
-  products: 'Ã°Å¸â€ºâ€™',
-  groups: 'Ã°Å¸â€˜Â¥',
-  clients: 'Ã°Å¸â€˜Â¤',
-  campaigns: 'Ã°Å¸â€œÂ¤',
-  live: 'Ã°Å¸â€œÂ¡',
-  schedules: 'Ã°Å¸â€œâ€¦',
-  analytics: 'Ã°Å¸â€œÅ ',
-  logs: 'Ã°Å¸â€œÂ',
-  settings: 'Ã¢Å¡â„¢Ã¯Â¸Â',
-  dataflow: 'Ã°Å¸â€¢Â¸Ã¯Â¸Â',
-  feedback: '!',
-  market: '?',
+  products: 'P',
+  groups: 'G',
+  clients: 'C',
+  campaigns: 'CM',
+  live: 'LV',
+  schedules: 'SC',
+  analytics: 'AN',
+  logs: 'LG',
+  settings: 'ST',
+  dataflow: 'DF',
+  feedback: 'FB',
+  market: 'MK',
 };
 
 const NAV: { key: Page; label: string }[] = [
@@ -194,7 +194,7 @@ export default function App() {
     <>
       <div className="flex items-center justify-between gap-2 p-4">
         <div className={`flex items-center gap-2 font-bold ${compact ? 'text-base' : 'text-lg'}`}>
-          <span aria-hidden>Ã°Å¸â€œÅ </span>
+          <span aria-hidden>•</span>
           {!compact && <span>Marketing</span>}
         </div>
         {/* Desktop-only collapse toggle; hidden below md. */}
@@ -258,7 +258,7 @@ export default function App() {
             compact ? 'justify-center' : ''
           }`}
         >
-          <span aria-hidden>Ã¢ÂÂ»</span>
+          <span aria-hidden>•</span>
           {!compact && <span className="truncate text-left">Kill Server</span>}
         </button>
       </div>
@@ -268,7 +268,7 @@ export default function App() {
   if (serverKilled) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-950 p-6 text-center text-slate-200">
-        <div className="text-4xl" aria-hidden>Ã¢ÂÂ»</div>
+        <div className="text-4xl" aria-hidden>•</div>
         <h1 className="text-xl font-semibold">Marketing Bot server stopped</h1>
         <p className="max-w-md text-sm text-slate-400">
           The backend and the WhatsApp browser have been shut down. To start it again,

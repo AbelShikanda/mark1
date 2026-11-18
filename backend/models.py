@@ -140,6 +140,12 @@ class ClientBase(BaseModel):
     location: Optional[str] = None
     birthdays: Optional[str] = None
 
+
+class Client(ClientBase):
+    id: Optional[int] = None
+
+
+class ClientInput(ClientBase):
     @field_validator("birthdays", mode="before")
     @classmethod
     def _birthdays(cls, value):
@@ -151,14 +157,19 @@ class ClientBase(BaseModel):
         try:
             return date.fromisoformat(text).isoformat()
         except ValueError:
+            # Be forgiving: accept DD/MM/YYYY or DD-MM-YYYY and normalise to ISO.
+            for sep in ("/", "-", "."):
+                parts = text.split(sep)
+                if len(parts) == 3:
+                    try:
+                        day, month, year = (int(p) for p in parts)
+                        if year < 100:
+                            year += 2000 if year < 50 else 1900
+                        return date(year, month, day).isoformat()
+                    except ValueError:
+                        continue
             raise ValueError("birthday must be a valid date (YYYY-MM-DD)")
 
-
-class Client(ClientBase):
-    id: Optional[int] = None
-
-
-class ClientInput(ClientBase):
     @field_validator("name")
     @classmethod
     def _name(cls, value: str) -> str:

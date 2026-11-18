@@ -1,4 +1,6 @@
 import sqlite3
+import re
+from datetime import date
 from typing import List
 from config import DB_PATH
 
@@ -329,10 +331,28 @@ def init_db() -> None:
     _add_column_if_missing(conn, "campaigns", "capture_replies", "INTEGER DEFAULT 0")
     _add_column_if_missing(conn, "campaigns", "capture_dwell_seconds", "INTEGER DEFAULT 30")
     _add_column_if_missing(conn, "campaign_posts", "product_id", "INTEGER")
-    # Normalise datetime-local values ("2026-12-01T09:00") so schedule
+    # Normalise legacy datetime-local values ("2026-12-01T09:00") so schedule
     # comparisons against "%Y-%m-%d %H:%M" work consistently.
     conn.execute("UPDATE schedules SET start_time = REPLACE(start_time, 'T', ' '), end_time = REPLACE(end_time, 'T', ' ')")
     conn.execute("UPDATE campaigns SET scheduled_time = REPLACE(scheduled_time, 'T', ' ') WHERE scheduled_time IS NOT NULL")
+    # Normalise legacy birthday formats (DD/MM/YYYY or DD-MM-YYYY) to ISO so the
+    # UI date picker and the API validators agree on the stored representation.
+    birthday_rows = conn.execute(
+        "SELECT id, birthdays FROM clients WHERE birthdays IS NOT NULL AND birthdays != ''"
+    ).fetchall()
+    _legacy_date = re.compile(r"^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$")
+    for row in birthday_rows:
+        match = _legacy_date.match(row["birthdays"].strip())
+        if not match:
+            continue
+        day, month, year = (int(group) for group in match.groups())
+        try:
+            conn.execute(
+                "UPDATE clients SET birthdays = ? WHERE id = ?",
+                (date(year, month, day).isoformat(), row["id"]),
+            )
+        except ValueError:
+            pass
     # A crash/reload mid-run would otherwise leave a campaign stuck as
     # "isRunning" forever, blocking every future campaign as "busy".
     stale = conn.execute("SELECT COUNT(*) AS c FROM campaigns WHERE status = 'isRunning'").fetchone()["c"]
