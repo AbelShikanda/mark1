@@ -369,6 +369,7 @@ class FeedbackBase(BaseModel):
     steps: Optional[str] = None
     expected: Optional[str] = None
     actual: Optional[str] = None
+    recommended: Optional[str] = None
     screenshots: List[str] = []
 
     @field_validator("screenshots")

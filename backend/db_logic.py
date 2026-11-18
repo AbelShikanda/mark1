@@ -278,6 +278,7 @@ def init_db() -> None:
         steps TEXT,
         expected TEXT,
         actual TEXT,
+        recommended TEXT,
         screenshots TEXT DEFAULT '[]',
         status TEXT NOT NULL DEFAULT 'new',
         created_at TEXT DEFAULT (datetime('now')),
@@ -309,6 +310,7 @@ def init_db() -> None:
     _add_column_if_missing(conn, "clients", "category", "TEXT")
     _add_column_if_missing(conn, "clients", "location", "TEXT")
     _add_column_if_missing(conn, "clients", "birthdays", "TEXT")
+    _add_column_if_missing(conn, "feedback", "recommended", "TEXT")
     _add_column_if_missing(conn, "campaigns", "campaign_type", "TEXT NOT NULL DEFAULT 'product_group'")
     _add_column_if_missing(conn, "campaigns", "product_id", "INTEGER")
     _add_column_if_missing(conn, "campaigns", "group_id", "INTEGER")

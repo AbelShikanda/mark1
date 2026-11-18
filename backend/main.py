@@ -868,8 +868,8 @@ def list_feedback(status: Optional[str] = None):
 @app.post("/feedback", response_model=Feedback)
 def create_feedback(payload: FeedbackInput):
     fid = execute(
-        "INSERT INTO feedback (type, severity, title, description, steps, expected, actual, screenshots, status) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new')",
+        "INSERT INTO feedback (type, severity, title, description, steps, expected, actual, recommended, screenshots, status) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')",
         (
             payload.type,
             payload.severity,
@@ -878,6 +878,7 @@ def create_feedback(payload: FeedbackInput):
             payload.steps,
             payload.expected,
             payload.actual,
+            payload.recommended,
             json.dumps(payload.screenshots),
         ),
     )

@@ -17,6 +17,7 @@ type FeedbackEntry = {
   steps: string | null;
   expected: string | null;
   actual: string | null;
+  recommended: string | null;
   screenshots: string[];
   status: FeedbackStatus;
   created_at: string | null;
@@ -69,6 +70,9 @@ function buildMarkdown(entry: FeedbackEntry): string {
     '### Actual',
     entry.actual?.trim() ? entry.actual : '_not provided_',
     '',
+    '### Recommended',
+    entry.recommended?.trim() ? entry.recommended : '_not provided_',
+    '',
     '### Evidence',
     screenshots,
   ].join('\n');
@@ -85,6 +89,7 @@ export default function FeedbackPage() {
   const [steps, setSteps] = useState('');
   const [expected, setExpected] = useState('');
   const [actual, setActual] = useState('');
+  const [recommended, setRecommended] = useState('');
   const [screenshots, setScreenshots] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -122,6 +127,7 @@ export default function FeedbackPage() {
     setSteps('');
     setExpected('');
     setActual('');
+    setRecommended('');
     setScreenshots([]);
   };
 
@@ -160,6 +166,7 @@ export default function FeedbackPage() {
         steps: steps.trim() || null,
         expected: expected.trim() || null,
         actual: actual.trim() || null,
+        recommended: recommended.trim() || null,
         screenshots,
       });
       setNotice('Feedback submitted. Thank you — it will be attached to the next fix round.');
@@ -285,6 +292,11 @@ export default function FeedbackPage() {
             </label>
           </div>
 
+          <label className="block space-y-1">
+            <span className={LABEL}>Recommended solution</span>
+            <textarea className={`${INPUT} min-h-[56px]`} value={recommended} onChange={(e) => setRecommended(e.target.value)} placeholder="What do you think should be done instead?" />
+          </label>
+
           <div className="space-y-1">
             <span className={LABEL}>Screenshots</span>
             <input
@@ -367,6 +379,11 @@ export default function FeedbackPage() {
                     <span className="font-semibold uppercase">{entry.severity}</span> · {entry.created_at ?? ''}
                   </p>
                   <p className="mt-1 whitespace-pre-wrap text-xs text-slate-600 dark:text-[#a3a3a3]">{entry.description}</p>
+                  {entry.recommended?.trim() && (
+                    <p className="mt-1 text-[11px] text-slate-500 dark:text-[#a3a3a3]">
+                      <span className="font-semibold text-slate-600 dark:text-[#d4d4d4]">Recommended:</span> {entry.recommended}
+                    </p>
+                  )}
 
                   {entry.screenshots.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
