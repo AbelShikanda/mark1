@@ -888,6 +888,31 @@ def create_feedback(payload: FeedbackInput):
     return _feedback_row(rows[0])
 
 
+@app.put("/feedback/{fid}")
+def replace_feedback(fid: int, payload: FeedbackInput):
+    rows = query("SELECT id FROM feedback WHERE id = ?", (fid,))
+    if not rows:
+        raise HTTPException(status_code=404, detail="feedback not found")
+    execute(
+        "UPDATE feedback SET type = ?, severity = ?, title = ?, description = ?, "
+        "steps = ?, expected = ?, actual = ?, recommended = ?, screenshots = ?, "
+        "updated_at = datetime('now') WHERE id = ?",
+        (
+            payload.type,
+            payload.severity,
+            payload.title,
+            payload.description,
+            payload.steps,
+            payload.expected,
+            payload.actual,
+            payload.recommended,
+            json.dumps(payload.screenshots),
+            fid,
+        ),
+    )
+    return _feedback_row(query("SELECT * FROM feedback WHERE id = ?", (fid,))[0])
+
+
 @app.patch("/feedback/{fid}", response_model=Feedback)
 def update_feedback(fid: int, payload: FeedbackUpdate):
     rows = query("SELECT id FROM feedback WHERE id = ?", (fid,))
