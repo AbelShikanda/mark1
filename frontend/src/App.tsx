@@ -30,18 +30,18 @@ type Page =
   | 'market';
 
 const ICONS: Record<Page, string> = {
-  products: 'P',
-  groups: 'G',
-  clients: 'C',
-  campaigns: 'CM',
-  live: 'LV',
-  schedules: 'SC',
-  analytics: 'AN',
-  logs: 'LG',
-  settings: 'ST',
-  dataflow: 'DF',
-  feedback: 'FB',
-  market: 'MK',
+  products: '▣',
+  groups: '⊞',
+  clients: '◆',
+  campaigns: '▲',
+  live: '●',
+  schedules: '▤',
+  analytics: '▥',
+  logs: '≡',
+  settings: '⚙',
+  dataflow: '∞',
+  feedback: '✉',
+  market: '↥',
 };
 
 const NAV: { key: Page; label: string }[] = [
@@ -194,7 +194,7 @@ export default function App() {
     <>
       <div className="flex items-center justify-between gap-2 p-4">
         <div className={`flex items-center gap-2 font-bold ${compact ? 'text-base' : 'text-lg'}`}>
-          <span aria-hidden>•</span>
+          <span aria-hidden>◆</span>
           {!compact && <span>Marketing</span>}
         </div>
         {/* Desktop-only collapse toggle; hidden below md. */}
@@ -258,7 +258,7 @@ export default function App() {
             compact ? 'justify-center' : ''
           }`}
         >
-          <span aria-hidden>•</span>
+          <span aria-hidden>◆</span>
           {!compact && <span className="truncate text-left">Kill Server</span>}
         </button>
       </div>
@@ -268,7 +268,7 @@ export default function App() {
   if (serverKilled) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-950 p-6 text-center text-slate-200">
-        <div className="text-4xl" aria-hidden>•</div>
+        <div className="text-4xl" aria-hidden>⏻</div>
         <h1 className="text-xl font-semibold">Marketing Bot server stopped</h1>
         <p className="max-w-md text-sm text-slate-400">
           The backend and the WhatsApp browser have been shut down. To start it again,
