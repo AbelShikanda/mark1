@@ -45,6 +45,7 @@ const ICONS: Record<Page, string> = {
 };
 
 const NAV: { key: Page; label: string }[] = [
+  { key: 'market', label: 'Market' },
   { key: 'products', label: 'Products' },
   { key: 'groups', label: 'Groups' },
   { key: 'clients', label: 'Clients' },
@@ -55,10 +56,8 @@ const NAV: { key: Page; label: string }[] = [
   { key: 'logs', label: 'Logs' },
   { key: 'dataflow', label: 'Dataflow' },
   { key: 'feedback', label: 'Feedback' },
-  { key: 'market', label: 'Market' },
   { key: 'settings', label: 'Settings' },
 ];
-
 type Connection = { state: string; message: string | null };
 
 const CONNECTION_DOT: Record<string, string> = {
