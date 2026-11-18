@@ -57,6 +57,8 @@ const STATUS_STYLE: Record<FeedbackStatus, string> = {
 
 const SEVERITY_RANK: Record<FeedbackSeverity, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 const STATUS_RANK: Record<FeedbackStatus, number> = { new: 0, triaged: 1, done: 2 };
+const TYPE_RANK: Record<FeedbackType, number> = { bug: 0, improvement: 1, other: 2 };
+const TRIAGE_RANK: Record<string, number> = Object.fromEntries(TRIAGE_OPTIONS.map((option, index) => [option.value, index]));
 
 const LABEL = 'block text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#a3a3a3]';
 const INPUT_LARGE = `${INPUT} w-full px-3 py-2 text-[15px] min-h-[42px]`;
@@ -99,7 +101,7 @@ function buildMarkdown(entry: FeedbackEntry): string {
 export default function FeedbackPage() {
   const [entries, setEntries] = useState<FeedbackEntry[]>([]);
   const [filter, setFilter] = useState<'all' | FeedbackStatus>('all');
-  const [sort, setSort] = useState<'newest' | 'oldest' | 'severity' | 'status'>('newest');
+  const [sort, setSort] = useState<'newest' | 'oldest' | 'severity' | 'status' | 'triage' | 'type'>('newest');
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [type, setType] = useState<FeedbackType>('bug');
@@ -147,16 +149,31 @@ export default function FeedbackPage() {
 
   const filtered = useMemo(() => {
     const base = filter === 'all' ? [...entries] : entries.filter((entry) => entry.status === filter);
+    const sorted = [...base];
     switch (sort) {
       case 'oldest':
-        return base.sort((a, b) => a.id - b.id);
+        sorted.sort((a, b) => a.id - b.id);
+        break;
       case 'severity':
-        return base.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || b.id - a.id);
+        sorted.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || b.id - a.id);
+        break;
       case 'status':
-        return base.sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || b.id - a.id);
+        sorted.sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || b.id - a.id);
+        break;
+      case 'triage':
+        sorted.sort((a, b) => (TRIAGE_RANK[a.triage ?? ''] ?? 99) - (TRIAGE_RANK[b.triage ?? ''] ?? 99) || b.id - a.id);
+        break;
+      case 'type':
+        sorted.sort((a, b) => TYPE_RANK[a.type] - TYPE_RANK[b.type] || b.id - a.id);
+        break;
       default:
-        return base.sort((a, b) => b.id - a.id);
+        sorted.sort((a, b) => b.id - a.id);
     }
+    // Done items always sink to the bottom unless the user is filtering to them.
+    if (filter !== 'done') {
+      sorted.sort((a, b) => (a.status === 'done' ? 1 : 0) - (b.status === 'done' ? 1 : 0));
+    }
+    return sorted;
   }, [entries, filter, sort]);
 
   const resetForm = () => {
@@ -443,6 +460,8 @@ export default function FeedbackPage() {
                 <option value="oldest">Oldest first</option>
                 <option value="severity">Severity (critical → low)</option>
                 <option value="status">Status (new → done)</option>
+                <option value="triage">Triage (accepted → not-a-bug)</option>
+                <option value="type">Type (bug → improvement → other)</option>
               </select>
               <div className="flex items-center gap-1" role="group" aria-label="Filter by status">
                 {(['all', 'new', 'triaged', 'done'] as const).map((key) => (
