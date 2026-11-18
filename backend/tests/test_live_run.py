@@ -214,7 +214,7 @@ def main_test() -> None:
         silenced = runner.record_group_failure(
             m1, "post failed", run_id=None, campaign_id=cid, target_name="miss-1"
         )
-        check(silenced is (index == 2), f"unexpected silence trigger at miss {index + 1}")
+        check(silenced == ("silenced" if index == 2 else "failed"), f"unexpected silence trigger at miss {index + 1}")
     fail_row = group_row(m1)
     check(fail_row["failures"] == 3, f"failures wrong: {fail_row['failures']}")
     check(fail_row["total_misses"] == 3, f"total_misses wrong: {fail_row['total_misses']}")

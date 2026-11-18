@@ -1,7 +1,7 @@
 import re
 from pydantic import BaseModel, field_validator
-from typing import List, Optional
-from datetime import datetime
+from typing import Any, Dict, List, Optional
+from datetime import datetime, date
 from urllib.parse import urlparse
 
 _PHONE_RE = re.compile(r"^\+?[0-9][0-9\s().-]{5,24}$")
@@ -140,6 +140,19 @@ class ClientBase(BaseModel):
     location: Optional[str] = None
     birthdays: Optional[str] = None
 
+    @field_validator("birthdays", mode="before")
+    @classmethod
+    def _birthdays(cls, value):
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            return date.fromisoformat(text).isoformat()
+        except ValueError:
+            raise ValueError("birthday must be a valid date (YYYY-MM-DD)")
+
 
 class Client(ClientBase):
     id: Optional[int] = None
@@ -174,6 +187,20 @@ class GroupBatch(GroupBatchBase):
     updated_at: Optional[str] = None
 
 
+class ClientBatchBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    client_ids: List[int] = []
+
+
+class ClientBatch(ClientBatchBase):
+    id: Optional[int] = None
+    client_count: int = 0
+    use_count: int = 0
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
 class CampaignBase(BaseModel):
     name: str
     campaign_type: str
@@ -193,6 +220,18 @@ class CampaignBase(BaseModel):
     auto_product: bool = False
     batch_size: int = 0
     duration_minutes: int = 60
+    capture_replies: bool = False
+    capture_dwell_seconds: int = 30
+
+    @field_validator("capture_dwell_seconds")
+    @classmethod
+    def _capture_dwell(cls, value: int) -> int:
+        number = int(value or 0)
+        if number < 0:
+            return 0
+        if number > 600:
+            return 600
+        return number
 
 
 class Campaign(CampaignBase):
@@ -238,3 +277,145 @@ class LogEntry(BaseModel):
     message: str
     source: str = "bot"
     created_at: Optional[datetime] = None
+
+
+# ── Live Dataflow payload (/live/db, versioned) ───────────────────────────
+class LiveDbHealth(BaseModel):
+    id: str
+    label: str
+    status: str  # idle | ok | warning | critical
+    percent: float = 0.0  # rough relative load 0..100, drives bar width
+    detail: str = ""
+
+
+class LiveDbFlow(BaseModel):
+    id: str
+    label: str
+    sent_per_min: float = 0.0
+    failed_1m: int = 0
+    total: int = 0
+    processed: int = 0
+    status: str = "idle"  # idle | running | completed | failed | stopped
+
+
+class LiveDbStepFailure(BaseModel):
+    step: str
+    count: int
+
+
+class LiveDbEvent(BaseModel):
+    id: Optional[int] = None
+    level: str = "info"
+    event_type: str = "progress"
+    message: str
+    created_at: Optional[str] = None
+
+
+class LiveDbRun(BaseModel):
+    active: bool = False
+    run_id: Optional[int] = None
+    campaign_name: Optional[str] = None
+    status: Optional[str] = None
+    phase: Optional[str] = None
+    total: int = 0
+    processed: int = 0
+    sent: int = 0
+    failed: int = 0
+    skipped: int = 0
+    remaining: int = 0
+    preview: int = 0
+
+
+class LiveDbPayload(BaseModel):
+    """Versioned payload served by GET /live/db (v=1).
+
+    Shape: { v, ts, pools[], flows[], events[], runs{}, steps[], db{},
+    scheduler_tick_seconds } — unknown keys are ignored by older/newer
+    clients; missing optional keys default instead of throwing.
+    """
+
+    v: int = 1
+    ts: str
+    pools: List[LiveDbHealth]
+    flows: List[LiveDbFlow]
+    events: List[LiveDbEvent]
+    runs: LiveDbRun
+    steps: List[LiveDbStepFailure] = []
+    db: Dict[str, Any] = {}
+    scheduler_tick_seconds: int = 5
+
+
+FEEDBACK_TYPES = ("bug", "improvement", "other")
+FEEDBACK_SEVERITIES = ("low", "medium", "high", "critical")
+FEEDBACK_STATUSES = ("new", "triaged", "done")
+
+
+class FeedbackBase(BaseModel):
+    type: str = "bug"
+    severity: str = "medium"
+    title: str
+    description: str
+    steps: Optional[str] = None
+    expected: Optional[str] = None
+    actual: Optional[str] = None
+    screenshots: List[str] = []
+
+    @field_validator("screenshots")
+    @classmethod
+    def _screenshots(cls, value):
+        out = []
+        for item in value or []:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            if not text.startswith("/uploads/"):
+                raise ValueError("screenshot must be an uploaded file path")
+            out.append(text)
+        return out
+
+    @field_validator("type")
+    @classmethod
+    def _type(cls, value: str) -> str:
+        text = str(value or "").strip().lower()
+        if text not in FEEDBACK_TYPES:
+            raise ValueError(f"type must be one of {', '.join(FEEDBACK_TYPES)}")
+        return text
+
+    @field_validator("severity")
+    @classmethod
+    def _severity(cls, value: str) -> str:
+        text = str(value or "").strip().lower()
+        if text not in FEEDBACK_SEVERITIES:
+            raise ValueError(f"severity must be one of {', '.join(FEEDBACK_SEVERITIES)}")
+        return text
+
+    @field_validator("title", "description")
+    @classmethod
+    def _required(cls, value: str, info) -> str:
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError(f"{info.field_name} is required")
+        return text
+
+
+class Feedback(FeedbackBase):
+    id: Optional[int] = None
+    status: str = "new"
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class FeedbackInput(FeedbackBase):
+    pass
+
+
+class FeedbackUpdate(BaseModel):
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def _status(cls, value: str) -> str:
+        text = str(value or "").strip().lower()
+        if text not in FEEDBACK_STATUSES:
+            raise ValueError(f"status must be one of {', '.join(FEEDBACK_STATUSES)}")
+        return text

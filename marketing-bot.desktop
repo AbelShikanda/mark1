@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Marketing Bot
+Comment=Automate WhatsApp product posts for your groups
+Exec=bash %h/Desktop/projects/marketing/start.sh
+Icon=utilities-terminal
+Terminal=false
+Type=Application
+Categories=Utility;

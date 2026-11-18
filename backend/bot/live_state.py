@@ -11,7 +11,10 @@ from typing import Any, Dict, Optional
 
 from db_logic import get_conn
 
+from . import settings as app_settings
+
 PAUSED_BY_CONNECTION = ("launching", "loading", "disconnected", "waiting_login", "waiting_qr", "reconnecting")
+EVER_CONNECTED_KEY = "whatsapp_ever_connected"
 
 
 def get_connection_state() -> Dict[str, Any]:
@@ -106,3 +109,9 @@ def update_connection_state(
             )
     conn.commit()
     conn.close()
+    if state == "connected":
+        try:
+            app_settings.set_meta_int(EVER_CONNECTED_KEY, 1)
+        except Exception:
+            # Pairing status is a UI hint; never break state updates over it.
+            pass

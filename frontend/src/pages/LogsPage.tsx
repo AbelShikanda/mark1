@@ -3,21 +3,22 @@ import { api, getErrorMessage } from '../api';
 import ErrorBanner from '../components/ErrorBanner';
 import DataTable, { TableToolbar, type DataTableColumn } from '../components/DataTable';
 import { useTableFilters } from '../hooks/useTableFilters';
+import StatusBadge, { type StatusTone } from '../components/StatusBadge';
 import { BTN_SECONDARY } from '../ui';
 
 type Log = { id: number; level: string; message: string; source: string; created_at: string };
 
 const LIMITS = [50, 100, 250, 500];
 
-const LEVEL_STYLES: Record<string, string> = {
-  error: 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300',
-  warning: 'bg-yellow-100 text-yellow-700 dark:bg-amber-950/60 dark:text-amber-300',
-  warn: 'bg-yellow-100 text-yellow-700 dark:bg-amber-950/60 dark:text-amber-300',
-  info: 'bg-green-100 text-green-700 dark:bg-emerald-950/60 dark:text-emerald-300',
+const LEVEL_TONE: Record<string, StatusTone> = {
+  error: 'error',
+  warning: 'warning',
+  warn: 'warning',
+  info: 'neutral',
 };
 
 const DATE_INPUT =
-  'rounded border border-slate-300 bg-white p-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100';
+  'rounded border border-slate-300 bg-white p-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none dark:border-[#2a2a2a] dark:bg-[#111] dark:text-[#f5f5f5]';
 
 export default function LogsPage() {
   const [logs, setLogs] = useState<Log[]>([]);
@@ -85,24 +86,20 @@ export default function LogsPage() {
       key: 'time',
       header: 'Time',
       filter: { type: 'text', placeholder: 'Filter time' },
-      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-xs text-slate-500 dark:text-[#a3a3a3]',
       cell: (log) => log.created_at,
     },
     {
       key: 'level',
       header: 'Level',
       filter: { type: 'select', options: levelOptions, placeholder: 'All levels' },
-      cell: (log) => (
-        <span className={`rounded px-2 py-1 text-xs ${LEVEL_STYLES[log.level] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
-          {log.level}
-        </span>
-      ),
+      cell: (log) => <StatusBadge tone={LEVEL_TONE[log.level] ?? 'neutral'}>{log.level}</StatusBadge>,
     },
     {
       key: 'source',
       header: 'Source',
       filter: { type: 'text' },
-      cellClassName: 'text-xs text-slate-600 dark:text-slate-300',
+      cellClassName: 'text-xs text-slate-600 dark:text-[#d4d4d4]',
       cell: (log) => log.source,
     },
     {
@@ -132,7 +129,7 @@ export default function LogsPage() {
         onClear={clearAll}
         isFiltered={isFiltered}
       >
-        <label className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+        <label className="flex items-center gap-1 text-xs text-slate-500 dark:text-[#a3a3a3]">
           Limit
           <select
             className={DATE_INPUT}
@@ -147,7 +144,7 @@ export default function LogsPage() {
             ))}
           </select>
         </label>
-        <label className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+        <label className="flex items-center gap-1 text-xs text-slate-500 dark:text-[#a3a3a3]">
           From
           <input
             type="date"
@@ -157,7 +154,7 @@ export default function LogsPage() {
             onChange={(event) => setFromDate(event.target.value)}
           />
         </label>
-        <label className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+        <label className="flex items-center gap-1 text-xs text-slate-500 dark:text-[#a3a3a3]">
           To
           <input
             type="date"

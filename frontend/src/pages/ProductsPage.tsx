@@ -27,7 +27,7 @@ const STATUS_LABELS: Record<string, string> = {
 const STATUS_STYLES: Record<string, string> = {
   isPosted: 'bg-green-100 text-green-700 dark:bg-emerald-950/60 dark:text-emerald-300',
   isPending: 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300',
-  isNotPosted: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+  isNotPosted: 'bg-slate-100 text-slate-600 dark:bg-[#111] dark:text-[#d4d4d4]',
 };
 
 const EMPTY = {
@@ -254,13 +254,13 @@ export default function ProductsPage() {
             <img
               src={p.media_url.startsWith('http') || p.media_url.startsWith('data:') ? p.media_url : `${API_BASE}${p.media_url}`}
               alt={p.name}
-              className="h-10 w-10 rounded border border-slate-200 object-cover dark:border-slate-700"
+              className="h-10 w-10 rounded border border-slate-200 object-cover dark:border-[#222]"
               onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
             />
           )}
           <div>
             <div className="font-medium">{p.name}</div>
-            {p.description && <div className="line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{p.description}</div>}
+            {p.description && <div className="line-clamp-2 text-xs text-slate-500 dark:text-[#a3a3a3]">{p.description}</div>}
             {p.link && <div className="max-w-xs truncate text-xs text-indigo-600 dark:text-indigo-400">{p.link}</div>}
           </div>
         </div>
@@ -270,7 +270,7 @@ export default function ProductsPage() {
       key: 'category',
       header: 'Category',
       filter: { type: 'select', options: categories, placeholder: 'All categories' },
-      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-xs text-slate-500 dark:text-[#a3a3a3]',
       cell: (p) => p.category ?? '-',
     },
     {
@@ -278,7 +278,7 @@ export default function ProductsPage() {
       header: 'Status',
       filter: { type: 'select', options: STATUS_OPTIONS, placeholder: 'All statuses' },
       cell: (p) => (
-        <span className={`rounded px-2 py-1 text-xs ${STATUS_STYLES[p.status] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+        <span className={`rounded px-2 py-1 text-xs ${STATUS_STYLES[p.status] ?? 'bg-slate-100 text-slate-600 dark:bg-[#111] dark:text-[#d4d4d4]'}`}>
           {STATUS_LABELS[p.status] ?? p.status}
         </span>
       ),
@@ -297,7 +297,7 @@ export default function ProductsPage() {
           <button
             onClick={() => setStatus(p.id, 'isNotPosted')}
             disabled={busyId === p.id || p.status === 'isNotPosted'}
-            className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-40 dark:border-[#2a2a2a] dark:text-[#e5e5e5] dark:hover:bg-[#161616]"
           >
             Not posted
           </button>
@@ -362,11 +362,11 @@ export default function ProductsPage() {
               {uploading ? 'Uploading image…' : saving ? 'Saving…' : editingId ? 'Save changes' : 'Add product'}
             </button>
             {editingId && (
-              <button type="button" onClick={resetForm} className="rounded border border-slate-300 px-4 py-2 text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800">
+              <button type="button" onClick={resetForm} className="rounded border border-slate-300 px-4 py-2 text-slate-600 hover:bg-slate-50 dark:border-[#2a2a2a] dark:text-[#d4d4d4] dark:hover:bg-[#161616]">
                 Cancel edit
               </button>
             )}
-            <button type="button" onClick={resetAll} className="ml-auto text-xs text-slate-600 hover:text-slate-900 hover:underline dark:text-slate-400 dark:hover:text-slate-100">
+            <button type="button" onClick={resetAll} className="ml-auto text-xs text-slate-600 hover:text-slate-900 hover:underline dark:text-[#a3a3a3] dark:hover:text-slate-100">
               Reset every product to “Not posted”
             </button>
             <button

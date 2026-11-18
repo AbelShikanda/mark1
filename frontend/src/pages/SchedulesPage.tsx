@@ -104,7 +104,7 @@ export default function SchedulesPage() {
       key: 'status',
       header: 'Status',
       filter: { type: 'select', options: statusOptions, placeholder: 'All statuses' },
-      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-xs text-slate-500 dark:text-[#a3a3a3]',
       cell: (schedule) => schedule.status,
     },
     {

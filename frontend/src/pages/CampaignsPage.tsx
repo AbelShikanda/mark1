@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, getErrorMessage } from '../api';
 import ErrorBanner from '../components/ErrorBanner';
+import StatusBadge, { toneForStatus } from '../components/StatusBadge';
 import DataTable, { TableToolbar, type DataTableColumn } from '../components/DataTable';
 import { useTableFilters } from '../hooks/useTableFilters';
 import { BTN_PRIMARY, CARD_PAD, INPUT, NOTICE_INFO } from '../ui';
@@ -27,6 +28,8 @@ type Campaign = {
   auto_product: boolean;
   batch_size: number;
   duration_minutes: number;
+  capture_replies: boolean;
+  capture_dwell_seconds: number;
   next_run_at: string | null;
   last_run_at: string | null;
 };
@@ -72,13 +75,6 @@ const STATUS_LABELS: Record<string, string> = {
   isPosted: 'Done',
 };
 
-const STATUS_STYLES: Record<string, string> = {
-  isRunning: 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-200',
-  isBusy: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-950/60 dark:text-yellow-200',
-  isPosted: 'bg-green-100 text-green-700 dark:bg-green-950/60 dark:text-green-200',
-  isScheduledFor: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
-};
-
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 function repeatSummary(c: Campaign): string {
@@ -104,6 +100,8 @@ const EMPTY = {
   frequency: 'daily',
   repeatDay: '1',
   repeatTime: '',
+  captureReplies: false,
+  captureDwellSeconds: '30',
 };
 
 export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId?: number) => void }) {
@@ -130,6 +128,8 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
   const [frequency, setFrequency] = useState(EMPTY.frequency);
   const [repeatDay, setRepeatDay] = useState(EMPTY.repeatDay);
   const [repeatTime, setRepeatTime] = useState(EMPTY.repeatTime);
+  const [captureReplies, setCaptureReplies] = useState(EMPTY.captureReplies);
+  const [captureDwellSeconds, setCaptureDwellSeconds] = useState(EMPTY.captureDwellSeconds);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -211,6 +211,8 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
     setFrequency(EMPTY.frequency);
     setRepeatDay(EMPTY.repeatDay);
     setRepeatTime(EMPTY.repeatTime);
+    setCaptureReplies(EMPTY.captureReplies);
+    setCaptureDwellSeconds(EMPTY.captureDwellSeconds);
     setEditingId(null);
   };
 
@@ -237,6 +239,8 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
     setFrequency(c.frequency || 'daily');
     setRepeatDay(String(c.repeat_day ?? 1));
     setRepeatTime(c.repeat_time ?? '');
+    setCaptureReplies(Boolean(c.capture_replies));
+    setCaptureDwellSeconds(String(c.capture_dwell_seconds ?? 30));
     setError(null);
     setNotice(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -286,6 +290,8 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
       auto_product: type === 'myGroupLink' ? false : autoProduct,
       batch_size: parseInt(batchSize, 10) || 0,
       duration_minutes: parseInt(duration, 10) || 60,
+      capture_replies: captureReplies,
+      capture_dwell_seconds: Math.min(600, Math.max(0, parseInt(captureDwellSeconds, 10) || 0)),
     };
     try {
       if (editingId) {
@@ -456,8 +462,8 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
         return (
           <div>
             <div className="font-medium">{campaign.name}</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">{TYPE_LABELS[campaign.campaign_type] ?? campaign.campaign_type}</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">
+            <div className="text-xs text-slate-500 dark:text-[#a3a3a3]">{TYPE_LABELS[campaign.campaign_type] ?? campaign.campaign_type}</div>
+            <div className="text-xs text-slate-500 dark:text-[#a3a3a3]">
               {campaign.campaign_type === 'myGroupLink'
                 ? 'My groups with links'
                 : campaign.auto_product
@@ -472,14 +478,14 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
       key: 'type',
       header: 'Type',
       filter: { type: 'select', options: typeOptions, placeholder: 'All types' },
-      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-xs text-slate-500 dark:text-[#a3a3a3]',
       cell: (campaign) => TYPE_LABELS[campaign.campaign_type] ?? campaign.campaign_type,
     },
     {
       key: 'target',
       header: 'Target',
       filter: { type: 'text', placeholder: 'Filter target' },
-      cellClassName: 'text-xs text-slate-600 dark:text-slate-300',
+      cellClassName: 'text-xs text-slate-600 dark:text-[#d4d4d4]',
       cell: (campaign) => {
         const campaignBatches = batches.filter((batch) => (campaign.batch_ids ?? []).includes(batch.id));
         const campaignBatchGroupCount = new Set(campaignBatches.flatMap((batch) => batch.group_ids ?? [])).size;
@@ -507,7 +513,7 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
       cell: (campaign) => (
         <>
           <div>{campaign.next_run_at ? `Next: ${campaign.next_run_at}` : 'Manual only'}</div>
-          <div className="text-slate-500 dark:text-slate-400">{repeatSummary(campaign)}</div>
+          <div className="text-slate-500 dark:text-[#a3a3a3]">{repeatSummary(campaign)}</div>
         </>
       ),
     },
@@ -516,9 +522,9 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
       header: 'Status',
       filter: { type: 'select', options: statusOptions, placeholder: 'All statuses' },
       cell: (campaign) => (
-        <span className={`rounded px-2 py-1 text-xs ${STATUS_STYLES[campaign.status] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+        <StatusBadge tone={toneForStatus(campaign.status)}>
           {STATUS_LABELS[campaign.status] ?? campaign.status}
-        </span>
+        </StatusBadge>
       ),
     },
     {
@@ -598,11 +604,11 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
             <option value="myGroupLink">My group link → groups</option>
           </select>
           {type === 'myGroupLink' ? (
-            <div className="rounded border border-slate-200 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+            <div className="rounded border border-slate-200 px-3 py-2 text-xs text-slate-600 dark:border-[#222] dark:bg-[#161616] dark:text-[#d4d4d4]">
               Uses only “My groups” that have a link ({myGroupsWithLinks.length} ready). Core groups are skipped as targets.
             </div>
           ) : (
-            <div className="flex items-center gap-3 rounded border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">
+            <div className="flex items-center gap-3 rounded border border-slate-200 px-3 py-2 text-sm dark:border-[#222]">
               <label className="flex items-center gap-2">
                 <input type="radio" checked={!autoProduct} onChange={() => setAutoProduct(false)} /> Fixed product
               </label>
@@ -636,27 +642,27 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
                   {groups.filter((g) => g.is_active !== false).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                 </select>
               ) : scope === 'batch' ? (
-                <div className="space-y-2 rounded border border-slate-200 p-3 dark:border-slate-700 md:col-span-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <div className="space-y-2 rounded border border-slate-200 p-3 dark:border-[#222] md:col-span-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-[#a3a3a3]">
                     <span>Select one or more batches ({batchIds.length} selected)</span>
-                    <span className="font-medium text-slate-700 dark:text-slate-200">{selectedBatchGroupCount} unique group(s)</span>
+                    <span className="font-medium text-slate-700 dark:text-[#e5e5e5]">{selectedBatchGroupCount} unique group(s)</span>
                   </div>
                   {batches.length === 0 ? (
-                    <div className="text-xs text-slate-400 dark:text-slate-500">Create group batches on the Groups page.</div>
+                    <div className="text-xs text-slate-400 dark:text-[#737373]">Create group batches on the Groups page.</div>
                   ) : (
-                    <div className="max-h-40 overflow-y-auto rounded border border-slate-100 p-1 dark:border-slate-700">
+                    <div className="max-h-40 overflow-y-auto rounded border border-slate-100 p-1 dark:border-[#222]">
                       {batches.map((batch) => (
-                        <label key={batch.id} className="flex items-center justify-between gap-2 rounded px-1 py-0.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">
+                        <label key={batch.id} className="flex items-center justify-between gap-2 rounded px-1 py-0.5 text-sm hover:bg-slate-50 dark:hover:bg-[#161616]">
                           <span className="flex items-center gap-2">
                             <input type="checkbox" checked={batchIds.includes(batch.id)} onChange={() => toggleBatch(batch.id)} />
                             <span>{batch.name}</span>
                           </span>
-                          <span className="text-xs text-slate-500 dark:text-slate-400">{batch.group_count} group(s)</span>
+                          <span className="text-xs text-slate-500 dark:text-[#a3a3a3]">{batch.group_count} group(s)</span>
                         </label>
                       ))}
                     </div>
                   )}
-                  <label className="block text-xs text-slate-500 dark:text-slate-400">
+                  <label className="block text-xs text-slate-500 dark:text-[#a3a3a3]">
                     Groups per batch (0 = all at once)
                     <input className={`${INPUT} mt-1 w-full`} type="number" min="0" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
                   </label>
@@ -674,16 +680,16 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
                 <option value="all">All clients (batched)</option>
               </select>
               {scope === 'single' ? (
-                <div className="rounded border border-slate-200 p-2 dark:border-slate-700 md:col-span-2">
-                  <div className="mb-1 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                <div className="rounded border border-slate-200 p-2 dark:border-[#222] md:col-span-2">
+                  <div className="mb-1 flex items-center justify-between text-xs text-slate-500 dark:text-[#a3a3a3]">
                     <span>Choose one or more clients ({clientIds.length} selected)</span>
                     <div className="flex gap-2">
                       <button type="button" className="text-indigo-600 hover:underline dark:text-indigo-400" onClick={() => setClientIds(clients.map((c) => c.id))}>All</button>
-                      <button type="button" className="text-slate-500 hover:underline dark:text-slate-400" onClick={() => setClientIds([])}>Clear</button>
+                      <button type="button" className="text-slate-500 hover:underline dark:text-[#a3a3a3]" onClick={() => setClientIds([])}>Clear</button>
                     </div>
                   </div>
                   <div className="max-h-40 overflow-y-auto">
-                    {clients.length === 0 && <div className="text-xs text-slate-400 dark:text-slate-500">No clients yet.</div>}
+                    {clients.length === 0 && <div className="text-xs text-slate-400 dark:text-[#737373]">No clients yet.</div>}
                     {clients.map((c) => (
                       <label key={c.id} className="flex items-center gap-2 py-0.5 text-sm">
                         <input type="checkbox" checked={clientIds.includes(c.id)} onChange={() => toggleClient(c.id)} />
@@ -692,7 +698,7 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
                     ))}
                   </div>
                   {clientIds.length > 1 && (
-                    <label className="mt-2 block text-xs text-slate-500 dark:text-slate-400">
+                    <label className="mt-2 block text-xs text-slate-500 dark:text-[#a3a3a3]">
                       Clients per batch (0 = all at once)
                       <input className={`${INPUT} mt-1 w-full`} type="number" min="0" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
                     </label>
@@ -707,17 +713,25 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={rePost} onChange={(e) => setRePost(e.target.checked)} /> Re-post even if already posted
           </label>
+          <label className="flex flex-wrap items-center gap-2 text-sm">
+            <input type="checkbox" checked={captureReplies} onChange={(e) => setCaptureReplies(e.target.checked)} /> Capture replies after sending
+            <span className="text-xs text-slate-500 dark:text-[#a3a3a3]">
+              Wait
+              <input className={`${INPUT} mx-1 inline-block w-16 py-1`} type="number" min="0" max="600" value={captureDwellSeconds} onChange={(e) => setCaptureDwellSeconds(e.target.value)} disabled={!captureReplies} />
+              seconds, then save the replies it sees in this chat.
+            </span>
+          </label>
 
-          <label className="text-xs text-slate-500 dark:text-slate-400 md:col-span-3">
+          <label className="text-xs text-slate-500 dark:text-[#a3a3a3] md:col-span-3">
             Start time (optional - leave empty for manual runs only)
             <input className={`${INPUT} mt-1 w-full`} type="datetime-local" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} />
           </label>
-          <label className="text-xs text-slate-500 dark:text-slate-400">
+          <label className="text-xs text-slate-500 dark:text-[#a3a3a3]">
             Run window (minutes)
             <input className={`${INPUT} mt-1 w-full`} type="number" min="5" value={duration} onChange={(e) => setDuration(e.target.value)} />
           </label>
 
-          <div className="rounded border border-slate-200 p-3 dark:border-slate-700 md:col-span-3">
+          <div className="rounded border border-slate-200 p-3 dark:border-[#222] md:col-span-3">
             <label className="flex items-center gap-2 text-sm font-medium">
               <input type="checkbox" checked={repeatPost} onChange={(e) => setRepeatPost(e.target.checked)} /> Repeat this campaign
             </label>
@@ -736,7 +750,7 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
                 {frequency === 'monthly' && (
                   <input className={INPUT} type="number" min="1" max="31" placeholder="Day of month" value={repeatDay} onChange={(e) => setRepeatDay(e.target.value)} />
                 )}
-                <label className="text-xs text-slate-500 dark:text-slate-400">
+                <label className="text-xs text-slate-500 dark:text-[#a3a3a3]">
                   At
                   <input className={`${INPUT} mt-1 w-full`} type="time" value={repeatTime} onChange={(e) => setRepeatTime(e.target.value)} />
                 </label>
@@ -749,7 +763,7 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
               {saving ? 'Saving…' : editingId ? 'Save changes' : 'Create campaign'}
             </button>
             {editingId && (
-              <button type="button" onClick={resetForm} className="rounded border border-slate-300 px-4 py-2 text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800">
+              <button type="button" onClick={resetForm} className="rounded border border-slate-300 px-4 py-2 text-slate-600 hover:bg-slate-50 dark:border-[#2a2a2a] dark:text-[#d4d4d4] dark:hover:bg-[#161616]">
                 Cancel edit
               </button>
             )}
@@ -777,7 +791,7 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
             <button
               type="button"
               onClick={() => onOpenLive?.(liveRun.campaign_id)}
-              className="rounded border border-indigo-300 bg-white px-3 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-slate-900 dark:text-indigo-300 dark:hover:bg-indigo-950/50"
+              className="rounded border border-indigo-300 bg-white px-3 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-[#0a0a0a] dark:text-indigo-300 dark:hover:bg-indigo-950/50"
             >
               Open live view
             </button>
@@ -785,7 +799,7 @@ export default function CampaignsPage({ onOpenLive }: { onOpenLive?: (campaignId
               type="button"
               onClick={skipLiveTarget}
               disabled={liveBusy || !liveRun.current_target}
-              className="rounded border border-amber-300 bg-white px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-40 dark:border-amber-800 dark:bg-slate-900 dark:text-amber-300 dark:hover:bg-amber-950/50"
+              className="rounded border border-amber-300 bg-white px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-40 dark:border-amber-800 dark:bg-[#0a0a0a] dark:text-amber-300 dark:hover:bg-amber-950/50"
             >
               {liveBusy ? 'Skipping…' : 'Skip current'}
             </button>

@@ -3,7 +3,8 @@ import { api, getErrorMessage } from '../api';
 import ErrorBanner from '../components/ErrorBanner';
 import DataTable, { TableToolbar, type DataTableColumn } from '../components/DataTable';
 import { useTableFilters } from '../hooks/useTableFilters';
-import { BTN_PRIMARY, BTN_SECONDARY, CARD_PAD, INPUT, MUTED, SUBTLE } from '../ui';
+import { useBatches, type Batch } from '../hooks/useBatches';
+import { ACTION_BTN_NEUTRAL, BTN_PRIMARY, BTN_SECONDARY, CARD_PAD, INPUT, MUTED, SUBTLE } from '../ui';
 import { isValidUrl, normalizeUrl } from '../validation';
 
 type Group = {
@@ -26,17 +27,6 @@ type Group = {
   last_success_at: string | null;
 };
 
-type GroupBatch = {
-  id: number;
-  name: string;
-  description: string | null;
-  group_ids: number[];
-  group_count: number;
-  campaign_count: number;
-  created_at: string | null;
-  updated_at: string | null;
-};
-
 const EMPTY = {
   name: '',
   category: '',
@@ -46,8 +36,6 @@ const EMPTY = {
   isMyGroup: false,
   isCore: false,
 };
-
-const ACTION_BTN = 'rounded border px-2 py-1 text-xs disabled:opacity-40';
 
 export default function GroupsPage() {
   const [groups, setGroups] = useState<Group[]>([]);
@@ -65,7 +53,7 @@ export default function GroupsPage() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [batches, setBatches] = useState<GroupBatch[]>([]);
+  const { batches, create: createBatch, update: updateBatch, remove: removeBatchApi } = useBatches('group');
   const [batchName, setBatchName] = useState('');
   const [batchDescription, setBatchDescription] = useState('');
   const [batchGroupIds, setBatchGroupIds] = useState<number[]>([]);
@@ -76,12 +64,8 @@ export default function GroupsPage() {
 
   const load = async () => {
     try {
-      const [groupRes, batchRes] = await Promise.all([
-        api.get<Group[]>('/groups'),
-        api.get<GroupBatch[]>('/group-batches'),
-      ]);
-      setGroups(Array.isArray(groupRes.data) ? groupRes.data : []);
-      setBatches(Array.isArray(batchRes.data) ? batchRes.data : []);
+      const res = await api.get<Group[]>('/groups');
+      setGroups(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -197,12 +181,12 @@ export default function GroupsPage() {
     setEditingBatchId(null);
   };
 
-  const startEditBatch = (batch: GroupBatch) => {
+  const startEditBatch = (batch: Batch) => {
     setView('batches');
     setEditingBatchId(batch.id);
     setBatchName(batch.name);
     setBatchDescription(batch.description ?? '');
-    setBatchGroupIds(Array.isArray(batch.group_ids) ? batch.group_ids : []);
+    setBatchGroupIds(batch.ids);
     setBatchSearch('');
     setError(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -224,19 +208,13 @@ export default function GroupsPage() {
       return;
     }
     setBatchSaving(true);
-    const payload = {
-      name: batchName.trim(),
-      description: batchDescription.trim() || null,
-      group_ids: batchGroupIds,
-    };
     try {
       if (editingBatchId) {
-        await api.patch(`/group-batches/${editingBatchId}`, payload);
+        await updateBatch(editingBatchId, batchName.trim(), batchDescription.trim(), batchGroupIds);
       } else {
-        await api.post('/group-batches', payload);
+        await createBatch(batchName.trim(), batchDescription.trim(), batchGroupIds);
       }
       resetBatchForm();
-      await load();
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -244,14 +222,13 @@ export default function GroupsPage() {
     }
   };
 
-  const removeBatch = async (batch: GroupBatch) => {
+  const removeBatch = async (batch: Batch) => {
     if (!window.confirm(`Delete group batch “${batch.name}”? This cannot be undone.`)) return;
     setError(null);
     setBatchBusyId(batch.id);
     try {
-      await api.delete(`/group-batches/${batch.id}`);
+      await removeBatchApi(batch.id);
       if (editingBatchId === batch.id) resetBatchForm();
-      await load();
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -321,7 +298,7 @@ export default function GroupsPage() {
     ],
   );
 
-  const batchesTable = useTableFilters<GroupBatch>(
+  const batchesTable = useTableFilters<Batch>(
     batches,
     (batch) => [batch.name, batch.description].filter(Boolean).join(' '),
     [{ key: 'batch', label: 'Batch', getValue: (batch) => batch.name }],
@@ -345,14 +322,14 @@ export default function GroupsPage() {
       key: 'category',
       header: 'Category',
       filter: { type: 'text', placeholder: 'Filter category' },
-      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-xs text-slate-500 dark:text-[#a3a3a3]',
       cell: (g) => g.category ?? '-',
     },
     {
       key: 'location',
       header: 'Location',
       filter: { type: 'text', placeholder: 'Filter location' },
-      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-xs text-slate-500 dark:text-[#a3a3a3]',
       cell: (g) => g.location ?? '-',
     },
     {
@@ -400,14 +377,14 @@ export default function GroupsPage() {
       header: 'Actions',
       cell: (g) => (
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => startEdit(g)} className={`${ACTION_BTN} border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/50`}>
+          <button onClick={() => startEdit(g)} className={`${ACTION_BTN_NEUTRAL} border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/50`}>
             Edit
           </button>
           {g.is_silenced && (
             <button
               onClick={() => unsilence(g)}
               disabled={busyId === g.id}
-              className={`${ACTION_BTN} border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/50`}
+              className={`${ACTION_BTN_NEUTRAL} border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/50`}
             >
               {busyId === g.id ? 'Clearing…' : 'Unsilence'}
             </button>
@@ -415,14 +392,14 @@ export default function GroupsPage() {
           <button
             onClick={() => toggleActive(g)}
             disabled={busyId === g.id}
-            className={`${ACTION_BTN} border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800`}
+            className={`${ACTION_BTN_NEUTRAL} border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-[#2a2a2a] dark:text-[#e5e5e5] dark:hover:bg-[#161616]`}
           >
             {g.is_active ? 'Disable' : 'Enable'}
           </button>
           <button
             onClick={() => remove(g)}
             disabled={busyId === g.id}
-            className={`${ACTION_BTN} border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50`}
+            className={`${ACTION_BTN_NEUTRAL} border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50`}
           >
             {busyId === g.id ? 'Deleting…' : 'Delete'}
           </button>
@@ -448,14 +425,14 @@ export default function GroupsPage() {
       key: 'category',
       header: 'Category',
       filter: { type: 'text', placeholder: 'Filter category' },
-      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-xs text-slate-500 dark:text-[#a3a3a3]',
       cell: (g) => g.category ?? '-',
     },
     {
       key: 'location',
       header: 'Location',
       filter: { type: 'text', placeholder: 'Filter location' },
-      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-xs text-slate-500 dark:text-[#a3a3a3]',
       cell: (g) => g.location ?? '-',
     },
     {
@@ -472,13 +449,13 @@ export default function GroupsPage() {
     {
       key: 'silenced',
       header: 'Silenced',
-      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-xs text-slate-500 dark:text-[#a3a3a3]',
       cell: (g) => g.silenced_at ?? '-',
     },
     {
       key: 'last_success',
       header: 'Last success',
-      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-xs text-slate-500 dark:text-[#a3a3a3]',
       cell: (g) => g.last_success_at ?? '-',
     },
     {
@@ -486,20 +463,20 @@ export default function GroupsPage() {
       header: 'Actions',
       cell: (g) => (
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => startEdit(g)} className={`${ACTION_BTN} border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/50`}>
+          <button onClick={() => startEdit(g)} className={`${ACTION_BTN_NEUTRAL} border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/50`}>
             Edit
           </button>
           <button
             onClick={() => unsilence(g)}
             disabled={busyId === g.id}
-            className={`${ACTION_BTN} border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/50`}
+            className={`${ACTION_BTN_NEUTRAL} border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/50`}
           >
             {busyId === g.id ? 'Clearing…' : 'Unsilence'}
           </button>
           <button
             onClick={() => remove(g)}
             disabled={busyId === g.id}
-            className={`${ACTION_BTN} border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50`}
+            className={`${ACTION_BTN_NEUTRAL} border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50`}
           >
             Delete
           </button>
@@ -508,7 +485,7 @@ export default function GroupsPage() {
     },
   ];
 
-  const batchColumns: DataTableColumn<GroupBatch>[] = [
+  const batchColumns: DataTableColumn<Batch>[] = [
     {
       key: 'batch',
       header: 'Batch',
@@ -516,7 +493,7 @@ export default function GroupsPage() {
       cell: (batch) => (
         <div>
           <div className="font-medium">{batch.name}</div>
-          {batch.description && <div className="text-xs text-slate-500 dark:text-slate-400">{batch.description}</div>}
+          {batch.description && <div className="text-xs text-slate-500 dark:text-[#a3a3a3]">{batch.description}</div>}
         </div>
       ),
     },
@@ -524,18 +501,18 @@ export default function GroupsPage() {
       key: 'groups',
       header: 'Groups',
       cellClassName: 'text-xs',
-      cell: (batch) => batch.group_count ?? batch.group_ids?.length ?? 0,
+      cell: (batch) => batch.itemCount,
     },
     {
       key: 'campaigns',
       header: 'Used by campaigns',
       cellClassName: 'text-xs',
-      cell: (batch) => batch.campaign_count ?? 0,
+      cell: (batch) => batch.campaignCount,
     },
     {
       key: 'updated',
       header: 'Updated',
-      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-xs text-slate-500 dark:text-[#a3a3a3]',
       cell: (batch) => batch.updated_at ?? batch.created_at ?? '—',
     },
     {
@@ -545,14 +522,14 @@ export default function GroupsPage() {
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => startEditBatch(batch)}
-            className={`${ACTION_BTN} border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/50`}
+            className={`${ACTION_BTN_NEUTRAL} border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/50`}
           >
             Edit
           </button>
           <button
             onClick={() => removeBatch(batch)}
             disabled={batchBusyId === batch.id}
-            className={`${ACTION_BTN} border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50`}
+            className={`${ACTION_BTN_NEUTRAL} border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50`}
           >
             {batchBusyId === batch.id ? 'Deleting…' : 'Delete'}
           </button>
@@ -565,7 +542,7 @@ export default function GroupsPage() {
     `rounded-t border-b-2 px-4 py-2 text-sm font-medium ${
       active
         ? 'border-indigo-600 text-indigo-700 dark:border-indigo-400 dark:text-indigo-300'
-        : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100'
+        : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-[#a3a3a3] dark:hover:text-slate-100'
     }`;
 
   return (
@@ -573,9 +550,9 @@ export default function GroupsPage() {
       <h1 className="text-2xl font-bold">Groups</h1>
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      <div className="sticky top-0 z-20 -mx-6 flex w-[calc(100%+3rem)] gap-1 border-b border-slate-200 bg-gray-50/95 px-6 py-2 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
+      <div className="sticky top-0 z-20 -mx-4 flex w-[calc(100%+2rem)] gap-1 border-b border-slate-200 bg-gray-50/95 px-4 py-2 backdrop-blur sm:-mx-6 sm:w-[calc(100%+3rem)] sm:px-6 dark:border-[#222] dark:bg-black/90">
         <button type="button" onClick={() => setView('groups')} className={tabClass(view === 'groups')}>
-          Groups <span className="ml-1 rounded-full bg-slate-200 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{groups.length}</span>
+          Groups <span className="ml-1 rounded-full bg-slate-200 px-2 py-0.5 text-xs text-slate-600 dark:bg-[#111] dark:text-[#d4d4d4]">{groups.length}</span>
         </button>
         <button type="button" onClick={() => setView('silenced')} className={tabClass(view === 'silenced')}>
           Silenced <span className="ml-1 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700 dark:bg-red-950/60 dark:text-red-200">{silencedGroups.length}</span>
@@ -722,18 +699,18 @@ export default function GroupsPage() {
               <button type="button" className="text-indigo-600 hover:underline dark:text-indigo-400" onClick={selectAllBatchGroups}>
                 Select all
               </button>
-              <button type="button" className="text-slate-500 hover:underline dark:text-slate-400" onClick={clearBatchGroups}>
+              <button type="button" className="text-slate-500 hover:underline dark:text-[#a3a3a3]" onClick={clearBatchGroups}>
                 Clear
               </button>
-              <span className="font-medium text-slate-700 dark:text-slate-200">{batchGroupIds.length} selected</span>
+              <span className="font-medium text-slate-700 dark:text-[#e5e5e5]">{batchGroupIds.length} selected</span>
             </div>
 
-            <div className="max-h-64 overflow-y-auto rounded border border-slate-200 p-2 dark:border-slate-700">
+            <div className="max-h-64 overflow-y-auto rounded border border-slate-200 p-2 dark:border-[#222]">
               {batchGroupOptions.length === 0 && (
-                <div className="p-2 text-xs text-slate-400 dark:text-slate-500">No groups match this search.</div>
+                <div className="p-2 text-xs text-slate-400 dark:text-[#737373]">No groups match this search.</div>
               )}
               {batchGroupOptions.map((g) => (
-                <label key={g.id} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">
+                <label key={g.id} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-sm hover:bg-slate-50 dark:hover:bg-[#161616]">
                   <span className="flex items-center gap-2">
                     <input
                       type="checkbox"

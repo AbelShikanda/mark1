@@ -113,6 +113,19 @@ def init_db() -> None:
         FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
         FOREIGN KEY (batch_id) REFERENCES group_batches(id)
     );
+    CREATE TABLE IF NOT EXISTS client_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS client_batch_members (
+        batch_id INTEGER NOT NULL,
+        client_id INTEGER NOT NULL,
+        PRIMARY KEY (batch_id, client_id),
+        FOREIGN KEY (batch_id) REFERENCES client_batches(id)
+    );
     CREATE TABLE IF NOT EXISTS schedules (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         campaign_id INTEGER NOT NULL,
@@ -206,6 +219,44 @@ def init_db() -> None:
     );
     CREATE INDEX IF NOT EXISTS idx_run_events_run_id
         ON campaign_run_events(run_id, id);
+    CREATE TABLE IF NOT EXISTS group_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id INTEGER,
+        campaign_post_id INTEGER,
+        run_id INTEGER,
+        sender TEXT,
+        text TEXT NOT NULL,
+        captured_at TEXT DEFAULT (datetime('now')),
+        intent TEXT DEFAULT 'unclassified',
+        sentiment TEXT DEFAULT 'neutral',
+        topics TEXT DEFAULT '[]',
+        spam_flag INTEGER DEFAULT 0,
+        reviewed INTEGER DEFAULT 0,
+        FOREIGN KEY (group_id) REFERENCES groups(id),
+        FOREIGN KEY (campaign_post_id) REFERENCES campaign_posts(id)
+    );
+    CREATE TABLE IF NOT EXISTS group_link_vault (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        normalized_link TEXT NOT NULL UNIQUE,
+        source TEXT NOT NULL DEFAULT 'capture',
+        group_id INTEGER,
+        first_seen TEXT DEFAULT (datetime('now')),
+        last_seen TEXT DEFAULT (datetime('now')),
+        seen_count INTEGER DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS market_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        period_start TEXT,
+        period_end TEXT,
+        generated_at TEXT DEFAULT (datetime('now')),
+        body_json TEXT NOT NULL,
+        summary_md TEXT,
+        trigger TEXT DEFAULT 'manual'
+    );
+    CREATE INDEX IF NOT EXISTS idx_group_messages_post ON group_messages(campaign_post_id);
+    CREATE INDEX IF NOT EXISTS idx_group_messages_group ON group_messages(group_id);
+    CREATE INDEX IF NOT EXISTS idx_group_messages_captured ON group_messages(captured_at);
     CREATE TABLE IF NOT EXISTS bot_state (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         state TEXT DEFAULT 'unknown',
@@ -214,6 +265,20 @@ def init_db() -> None:
         max_attempts INTEGER,
         qr_visible INTEGER DEFAULT 0,
         next_retry_at TEXT,
+        updated_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS feedback (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL DEFAULT 'bug',
+        severity TEXT NOT NULL DEFAULT 'medium',
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        steps TEXT,
+        expected TEXT,
+        actual TEXT,
+        screenshots TEXT DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'new',
+        created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT
     );
     """)
@@ -261,6 +326,9 @@ def init_db() -> None:
     _add_column_if_missing(conn, "campaigns", "last_run_at", "TEXT")
     _add_column_if_missing(conn, "campaigns", "next_run_at", "TEXT")
     _add_column_if_missing(conn, "campaigns", "posts_sent", "INTEGER DEFAULT 0")
+    _add_column_if_missing(conn, "campaigns", "capture_replies", "INTEGER DEFAULT 0")
+    _add_column_if_missing(conn, "campaigns", "capture_dwell_seconds", "INTEGER DEFAULT 30")
+    _add_column_if_missing(conn, "campaign_posts", "product_id", "INTEGER")
     # Normalise datetime-local values ("2026-12-01T09:00") so schedule
     # comparisons against "%Y-%m-%d %H:%M" work consistently.
     conn.execute("UPDATE schedules SET start_time = REPLACE(start_time, 'T', ' '), end_time = REPLACE(end_time, 'T', ' ')")

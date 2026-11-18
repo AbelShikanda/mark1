@@ -24,6 +24,7 @@ from .campaign_runner import (
     session_qr,
     show_browser,
     use_headless,
+    use_headed,
 )
 
 __all__ = [
@@ -55,4 +56,5 @@ __all__ = [
     "session_qr",
     "show_browser",
     "use_headless",
+    "use_headed",
 ]

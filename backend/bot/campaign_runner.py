@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import random
 import shutil
+import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -41,6 +43,7 @@ from scheduling import (
     sync_campaign_schedule,
 )
 from . import run_state, settings as app_settings
+from .capture import capture_post_replies
 from .live_state import get_connection_state, update_connection_state
 from .login_manager import WhatsAppBot
 from .poster import post_product, post_text
@@ -52,6 +55,87 @@ _cancel_events: Dict[int, threading.Event] = {}
 
 
 # ── bot lifecycle ───────────────────────────────────────────────────────
+
+
+def _force_kill_browser_processes_linux() -> int:
+    """Linux branch: SIGKILL Chromium/headless_shell processes using our profile."""
+    killed = 0
+    try:
+        out = subprocess.run(
+            ["pgrep", "-f", "whatsapp_session"],
+            capture_output=True, text=True, timeout=15,
+        ).stdout
+    except Exception as exc:
+        log("warning", f"pgrep failed: {exc}", "campaign_runner")
+        return 0
+    import os
+    import signal
+
+    for line in out.splitlines():
+        pid_s = line.strip()
+        if not pid_s.isdigit():
+            continue
+        pid = int(pid_s)
+        if pid == os.getpid():
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+            killed += 1
+        except Exception as exc:
+            log("warning", f"kill pid {pid} failed: {exc}", "campaign_runner")
+    if killed:
+        log("info", f"force-killed {killed} browser process(es)", "campaign_runner")
+    return killed
+
+
+def force_kill_browser_processes() -> int:
+    """Hard-kill Chromium/headless_shell processes for this app's profile.
+
+    A graceful Playwright ``context.close()`` can hang indefinitely while a
+    page is mid-navigation, so the Stop button must not depend on it: match
+    browser processes whose command line references our WhatsApp profile
+    directory and taskkill them immediately.
+    """
+    marker = str(SESSION_DIR).lower().replace("\\", "/")
+
+    if sys.platform.startswith("linux"):
+        return _force_kill_browser_processes_linux()
+
+    ps = (
+        "Get-CimInstance Win32_Process | "
+        "Where-Object { ($_.Name -match 'chrome|headless_shell|chromium') -and $_.CommandLine } | "
+        "ForEach-Object { $_.ProcessId.ToString() + '|' + $_.CommandLine }"
+    )
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True, timeout=20,
+        ).stdout
+    except Exception as exc:
+        log("warning", f"could not enumerate browser processes: {exc}", "campaign_runner")
+        return 0
+    killed = 0
+    seen = set()
+    for line in out.splitlines():
+        pid_s, _, cmdline = line.partition("|")
+        pid_s = pid_s.strip()
+        if not pid_s.isdigit() or int(pid_s) in seen:
+            continue
+        cmd_norm = (cmdline or "").lower().replace("\\", "/")
+        if "whatsapp_session" not in cmd_norm and marker not in cmd_norm:
+            continue
+        seen.add(int(pid_s))
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", pid_s, "/T", "/F"],
+                capture_output=True, timeout=15,
+            )
+            killed += 1
+        except Exception as exc:
+            log("warning", f"taskkill pid {pid_s} failed: {exc}", "campaign_runner")
+    if killed:
+        log("info", f"force-killed {killed} browser process(es)", "campaign_runner")
+    return killed
 
 
 def get_bot(headless: bool = False) -> WhatsAppBot:
@@ -88,12 +172,17 @@ def get_bot(headless: bool = False) -> WhatsAppBot:
 def stop_bot() -> None:
     global _bot
     with _bot_lock:
-        if _bot is not None:
-            try:
-                _bot.stop()
-            except Exception:
-                pass
-            _bot = None
+        bot = _bot
+        _bot = None
+    if bot is not None:
+        try:
+            bot.stop()
+        except Exception:
+            pass
+    # Whatever the graceful stop managed, make sure no Chromium process keeps
+    # running against the shared profile: Stop must not depend on a cooperative
+    # page that may be stuck mid-navigation.
+    force_kill_browser_processes()
 
 
 # ── session lifecycle (QR after N runs) ─────────────────────────────────
@@ -141,6 +230,7 @@ def session_status() -> Dict[str, Any]:
         "limit": limit,
         "session_exists": _session_dir_has_files(),
         "connected": _browser_open_state()["state"] == "connected",
+        "ever_connected": bool(app_settings.get_meta_int("whatsapp_ever_connected", 0)),
         **_browser_open_state(),
     }
 
@@ -232,11 +322,35 @@ def use_headless() -> Dict[str, Any]:
     }
 
 
+def use_headed() -> Dict[str, Any]:
+    """Persist visible-browser mode and relaunch the live session in a window."""
+    try:
+        app_settings.update_settings({"headless": False})
+    except Exception as exc:  # settings write failed; still report gracefully
+        log("warning", f"could not persist headed setting: {exc}", "whatsapp")
+    with _bot_lock:
+        bot = _bot
+    ok = True
+    if bot is not None and bot.headless:
+        ok = bot.relaunch_headed()
+    return {
+        "ok": ok,
+        "message": (
+            "Switched WhatsApp to a visible browser window."
+            if ok
+            else "Visible-window relaunch failed; the hidden browser was kept open."
+        ),
+        "browser_open": bool(bot is not None and not bot.is_browser_closed()),
+        "headless": False,
+    }
+
+
 def reset_session() -> Dict[str, Any]:
     """Forget the saved profile and force a QR scan on the next campaign run."""
     stop_bot()
     clear_session_dir()
     app_settings.set_meta_int(SESSION_RUNS_KEY, 0)
+    app_settings.set_meta_int("whatsapp_ever_connected", 0)
     try:
         update_connection_state("stopped", "Saved session cleared; QR required")
     except Exception:
@@ -270,6 +384,38 @@ def prepare_session_for_run() -> Dict[str, Any]:
         log("info", f"[session] using saved session ({used}/{limit})", "poster")
 
     return {"limit": limit, "used": used, "cleared": cleared}
+
+
+def pair_headed_for_run(campaign_id: int) -> bool:
+    """Open a visible browser so the user can scan the QR, then close it.
+
+    Used when the configured mode is headless but WhatsApp needs a fresh
+    pairing: headless hides the QR, so we pop a real window, wait for the
+    scan, close it, and let the run relaunch hidden with the saved session.
+    """
+    cancel_event = _event_for(campaign_id)
+    log("info", f"campaign {campaign_id}: opening visible browser for WhatsApp pairing", "campaign_runner")
+    bot = WhatsAppBot(headless=False)
+    bot.cancel_event = cancel_event
+    try:
+        bot.start()
+        update_connection_state("loading", "Loading WhatsApp Web")
+        bot.page.goto("https://web.whatsapp.com", wait_until="domcontentloaded", timeout=60000)
+        ok = bot.wait_for_pairing()
+    except Exception as exc:
+        log("error", f"campaign {campaign_id}: pairing browser failed: {exc}", "campaign_runner")
+        ok = False
+    finally:
+        try:
+            bot.stop()
+        except Exception:
+            pass
+    if ok:
+        app_settings.set_meta_int("whatsapp_ever_connected", 1)
+        log("info", f"campaign {campaign_id}: WhatsApp paired; pairing window closed", "campaign_runner")
+    else:
+        log("warning", f"campaign {campaign_id}: WhatsApp pairing did not complete", "campaign_runner")
+    return ok
 
 
 # ── product selection ───────────────────────────────────────────────────
@@ -364,12 +510,18 @@ def mark_product_posted(pid: int) -> None:
 # ── group caps / failures ───────────────────────────────────────────────
 
 
-def can_post_to_group(group: Dict[str, Any]) -> bool:
-    return (
-        bool(group.get("is_active", 1))
-        and not bool(group.get("is_silenced", 0))
-        and group["isPostedProductToday"] < max(1, group["n"])
-    )
+def can_post_to_group(group: Dict[str, Any], repost: bool = False) -> bool:
+    """Daily-cap gate.
+
+    The per-group daily cap is only bypassed by campaigns with
+    "Re-post even if already posted" enabled; active/silenced state is
+    always enforced.
+    """
+    if not bool(group.get("is_active", 1)) or bool(group.get("is_silenced", 0)):
+        return False
+    if repost:
+        return True
+    return group["isPostedProductToday"] < max(1, group["n"])
 
 
 def mark_group_posted(group_id: int) -> None:
@@ -409,13 +561,31 @@ def record_group_failure(
     run_id: Optional[int] = None,
     campaign_id: Optional[int] = None,
     target_name: Optional[str] = None,
-) -> bool:
-    """Record one miss. Returns True when the group just got silenced.
+) -> str:
+    """Record one miss. Returns "skipped" | "failed" | "silenced" | "not_found".
 
     ``failures`` is the consecutive-miss counter; ``total_misses`` is lifetime.
     Silence (not the manual ``is_active`` flag) is what excludes a group after
     repeated misses.
+
+    A target whose post failed while the user asked to skip it is a skip, not
+    a miss: it must not count toward failure streaks or silencing. The target
+    result is recorded as "skipped" before returning "skipped".
     """
+    # A target whose post failed while the user asked to skip it is a skip,
+    # not a miss: it must not count toward failure streaks or silencing.
+    if campaign_id and run_id and run_state.skip_requested(campaign_id):
+        log(
+            "info",
+            f"group {group_id} post failed with a skip requested; recording as skipped, not missed",
+            "campaign_runner",
+        )
+        run_state.clear_skip(campaign_id)
+        run_state.record_target_result(
+            run_id, "group", group_id, "skipped", "Skipped by user",
+            target_name=target_name, campaign_id=campaign_id,
+        )
+        return "skipped"
     conn = get_conn()
     row = conn.execute(
         "SELECT name, failures, total_misses, is_silenced, is_active "
@@ -426,7 +596,7 @@ def record_group_failure(
         conn.close()
         if reason:
             log("warning", f"group {group_id} failed: {reason} (group not found)", "campaign_runner")
-        return False
+        return "not_found"
     name = target_name or row["name"] or f"group {group_id}"
     failures = int(row["failures"] or 0) + 1
     total_misses = int(row["total_misses"] or 0) + 1
@@ -465,7 +635,7 @@ def record_group_failure(
             target_name=name,
             campaign_id=campaign_id,
         )
-    return should_silence
+    return "silenced" if should_silence else "failed"
 
 
 def record_group_success(
@@ -746,7 +916,7 @@ def pick_group_batch(campaign: Dict[str, Any], exclude_core: bool = False, exclu
     if campaign.get("target_scope") == "batch":
         pool = [
             g for g in _batch_scope_groups(campaign, exclude_core, exclude_name)
-            if can_post_to_group(g)
+            if can_post_to_group(g, repost=bool(campaign.get("rePost")))
         ]
         if not pool:
             return []
@@ -767,7 +937,7 @@ def pick_group_batch(campaign: Dict[str, Any], exclude_core: bool = False, exclu
             continue
         if exclude_name and (group.get("name") or "").strip().lower() == exclude_name.strip().lower():
             continue
-        if can_post_to_group(group):
+        if can_post_to_group(group, repost=bool(campaign.get("rePost"))):
             eligible.append(group)
     if not eligible:
         return []
@@ -814,7 +984,7 @@ def _preview_group_pool(
     if campaign.get("target_scope") == "batch":
         return [
             g for g in _batch_scope_groups(campaign, exclude_core, exclude_name)
-            if can_post_to_group(g)
+            if can_post_to_group(g, repost=bool(campaign.get("rePost")))
         ]
 
     conn = get_conn()
@@ -828,7 +998,7 @@ def _preview_group_pool(
             continue
         if exclude_name and (group.get("name") or "").strip().lower() == exclude_name.strip().lower():
             continue
-        if can_post_to_group(group):
+        if can_post_to_group(group, repost=bool(campaign.get("rePost"))):
             eligible.append(group)
     if campaign.get("target_scope") == "all":
         return eligible
@@ -1003,14 +1173,16 @@ def record_campaign_post(
     target_id: Optional[int],
     target_name: str,
     status: str = "sent",
-) -> None:
+    product_id: Optional[int] = None,
+) -> int:
     """Persist one campaign target result and roll it into today's analytics."""
     conn = get_conn()
-    conn.execute(
-        "INSERT INTO campaign_posts (campaign_id, target_type, target_id, target_name, status) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (campaign_id, target_type, target_id, target_name, status),
+    cur = conn.execute(
+        "INSERT INTO campaign_posts (campaign_id, target_type, target_id, target_name, status, product_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (campaign_id, target_type, target_id, target_name, status, product_id),
     )
+    post_id = int(cur.lastrowid)
     if status == "sent":
         today = datetime.now().strftime("%Y-%m-%d")
         groups_reached = 1 if target_type == "group" else 0
@@ -1028,6 +1200,7 @@ def record_campaign_post(
             )
     conn.commit()
     conn.close()
+    return post_id
 
 
 def set_campaign_status(cid: int, status: str) -> None:
@@ -1124,6 +1297,19 @@ def run_campaign(cid: int) -> None:
 
         session_info = prepare_session_for_run()
         session_limit = int(session_info.get("limit") or session_limit)
+
+        # Headless hides the QR, so a run that needs a fresh pairing opens a
+        # visible browser, waits for the scan, closes it, then the run
+        # relaunches hidden with the saved session.
+        if app_settings.get_bool("headless", False) and (
+            session_info.get("cleared") or not _session_dir_has_files()
+        ):
+            if not pair_headed_for_run(cid):
+                raise RuntimeError(
+                    "WhatsApp pairing did not complete. A browser window was opened "
+                    "for the QR scan but login was not detected (cancelled, closed, or timed out). "
+                    "Run the campaign again and scan the QR code."
+                )
 
         bot = get_bot(headless=app_settings.get_bool("headless", False))
         app_settings.set_meta_int(
@@ -1300,7 +1486,7 @@ def run_product_group(
             )
             break
 
-        if not can_post_to_group(group):
+        if not can_post_to_group(group, repost=bool(campaign.get("rePost"))):
             run_state.record_target_result(
                 run_id, "group", group["id"], "deferred",
                 "Daily cap reached, disabled or silenced",
@@ -1329,7 +1515,9 @@ def run_product_group(
             run_state.clear_skip(campaign["id"])
             mark_group_posted(group["id"])
             record_group_success(group["id"], run_id=run_id, campaign_id=campaign["id"])
-            record_campaign_post(campaign["id"], "group", group["id"], group["name"], "sent")
+            post_id = record_campaign_post(campaign["id"], "group", group["id"], group["name"], "sent", product.get("id"))
+            if campaign.get("capture_replies"):
+                capture_post_replies(bot, campaign["id"], group["id"], post_id, run_id)
             run_state.record_target_result(
                 run_id, "group", group["id"], "sent", "Sent",
                 target_name=group["name"], campaign_id=campaign["id"],
@@ -1342,15 +1530,16 @@ def run_product_group(
                 target_name=group["name"], campaign_id=campaign["id"],
             )
         else:
-            record_group_failure(
+            outcome = record_group_failure(
                 group["id"], "post failed",
                 run_id=run_id, campaign_id=campaign["id"], target_name=group["name"],
             )
-            record_campaign_post(campaign["id"], "group", group["id"], group["name"], "failed")
-            run_state.record_target_result(
-                run_id, "group", group["id"], "failed", "Post failed or could not be confirmed",
-                target_name=group["name"], campaign_id=campaign["id"],
-            )
+            if outcome != "skipped":
+                record_campaign_post(campaign["id"], "group", group["id"], group["name"], "failed")
+                run_state.record_target_result(
+                    run_id, "group", group["id"], "failed", "Post failed or could not be confirmed",
+                    target_name=group["name"], campaign_id=campaign["id"],
+                )
     return sent
 
 
@@ -1514,7 +1703,7 @@ def run_my_group_link(
             )
             break
 
-        if not can_post_to_group(group):
+        if not can_post_to_group(group, repost=bool(campaign.get("rePost"))):
             run_state.record_target_result(
                 run_id, "group", group["id"], "deferred",
                 "Daily cap reached, disabled or silenced",
@@ -1538,7 +1727,9 @@ def run_my_group_link(
             run_state.clear_skip(campaign["id"])
             mark_group_posted(group["id"])
             record_group_success(group["id"], run_id=run_id, campaign_id=campaign["id"])
-            record_campaign_post(campaign["id"], "group", group["id"], group["name"], "sent")
+            post_id = record_campaign_post(campaign["id"], "group", group["id"], group["name"], "sent")
+            if campaign.get("capture_replies"):
+                capture_post_replies(bot, campaign["id"], group["id"], post_id, run_id)
             run_state.record_target_result(
                 run_id, "group", group["id"], "sent", "Sent",
                 target_name=group["name"], campaign_id=campaign["id"],
@@ -1551,15 +1742,16 @@ def run_my_group_link(
                 target_name=group["name"], campaign_id=campaign["id"],
             )
         else:
-            record_group_failure(
+            outcome = record_group_failure(
                 group["id"], "link post failed",
                 run_id=run_id, campaign_id=campaign["id"], target_name=group["name"],
             )
-            record_campaign_post(campaign["id"], "group", group["id"], group["name"], "failed")
-            run_state.record_target_result(
-                run_id, "group", group["id"], "failed", "Post failed or could not be confirmed",
-                target_name=group["name"], campaign_id=campaign["id"],
-            )
+            if outcome != "skipped":
+                record_campaign_post(campaign["id"], "group", group["id"], group["name"], "failed")
+                run_state.record_target_result(
+                    run_id, "group", group["id"], "failed", "Post failed or could not be confirmed",
+                    target_name=group["name"], campaign_id=campaign["id"],
+                )
     return sent
 
 

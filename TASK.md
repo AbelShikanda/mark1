@@ -72,3 +72,23 @@
 - [x] Groups page batch CRUD UI (searchable group picker, select all/clear, badges, usage count).
 - [x] Campaigns page batch selection/editing, combined unique group count, and target summaries.
 - [x] README section; single-group, all-groups, product_client and myGroupLink paths unchanged.
+## Phase 9 � live priorities (added 2026-11-18)
+
+### High
+- [x] Feedback page: in-app suggestion box for bugs/improvements � type, title, description, steps to reproduce, expected/actual, screenshot upload to uploads/, stored in a `feedback` table; dashboard page; one-click "copy as markdown issue" export (environment, steps, evidence) ready to paste to an agent
+- [ ] Message capture during campaign runs (opt-in per campaign): per-campaign `capture_replies` toggle + `capture_dwell_seconds` per group with a global default in Settings (default 0 / disabled); capture only after a confirmed-sent post; DOM scrape after the dwell; raw rows stored in a `group_messages` table linked to campaign_posts/run_id; capture failures can never fail the post/campaign
+- [ ] Retention: Settings field `message_retention_days` (default e.g. 30) auto-purges raw captured messages; generated reports/conclusions are retained until manually removed
+- [ ] Reports: define what a report contains (candidate: saved analysis snapshot � intent/sentiment summary, top questions, leaderboards, best time) and add on-demand generation + retained-list UI; confirm definition with user first
+- [ ] Message classification (local, offline): intent/topic/sentiment via keyword rules in English/Swahili/Sheng; stored per captured message; feeds the reports
+- [ ] Analytics on captured data: best posting time, group leaderboard, post leaderboard (depends on capture + classification)
+- [ ] Deferred (not scheduled): per-link click tracking � needs an external redirector (e.g. self-hosted Cloudflare Worker, free tier); revisit when analytics core lands
+
+## Phase 10 - Kali / Linux support
+- [ ] start.sh + .desktop launcher (builds frontend, starts server on :8000, opens browser)
+- [ ] stop script (kill venv python + chromium PIDs on port flow, Linux equivalent of stop-server.ps1)
+- [ ] Linux branch in force_kill_browser_processes (pkill/pgrep on chromium PIDs whose cmdline references whatsapp_session)
+- [ ] Document/verify playwright install --with-deps chromium on Kali (apt system libraries)
+- [ ] Decide root-user handling: document "run as normal user" OR add --no-sandbox when euid==0
+- [ ] Linux splash equivalent or drop splash on Linux (shell-friendly banner)
+- [ ] Test full campaign run + Stop + Kill Server on a Kali machine (or container) end to end
+- [ ] Validate config.py browser path fallback on Linux (~/.cache/ms-playwright vs BASE_DIR/ms-playwright)

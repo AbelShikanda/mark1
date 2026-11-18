@@ -193,6 +193,18 @@ def _emit(on_event: EventCallback, message: str) -> None:
         pass
 
 
+def _sleep_with_cancel(bot: WhatsAppBot, seconds: float) -> bool:
+    """Sleep in short slices and return True if the caller should abort now."""
+    deadline = time.monotonic() + max(0.0, seconds)
+    while True:
+        if bot.cancelled():
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.25, remaining))
+
+
 def _skip_requested(should_skip: SkipCheck) -> bool:
     if should_skip is None:
         return False
@@ -326,6 +338,14 @@ def _enter_search(page, target: str, trace: Optional[Trace] = None) -> bool:
     if trace:
         trace.step("search", "waiting", f"{wait:.1f}s")
     time.sleep(wait)
+
+    extra = app_settings.get_float("results_wait", 0.0)
+    if extra > 0:
+        deadline = time.time() + extra
+        while time.time() < deadline:
+            if _rows_visible(page):
+                break
+            time.sleep(0.25)
     return True
 
 
@@ -640,7 +660,7 @@ def _try_candidate(
                 )
             return None, "read_only", restricted
 
-        timeout = 8.0 if method == "title" else 6.0
+        timeout = app_settings.get_float("compose_timeout", 8.0)
         compose, compose_selector = _wait_for_compose(page, timeout=timeout)
 
         header = _opened_chat_title(page)
@@ -866,7 +886,8 @@ def open_chat(
             except Exception:
                 pass
             bot.dismiss_popups(handle_welcome=False)
-            time.sleep(delay)
+            if _sleep_with_cancel(bot, delay):
+                return False
     log("warning", f"'{target}' could not be opened after {attempts} attempts", "poster")
     return False
 
@@ -1006,7 +1027,8 @@ def _wait_for_link_preview(bot: WhatsAppBot, text: str, trace: Optional[Trace] =
                 break
         if found_selector:
             break
-        time.sleep(1)
+        if _sleep_with_cancel(bot, 1):
+            return
 
     if found_selector:
         if trace:
@@ -1016,21 +1038,25 @@ def _wait_for_link_preview(bot: WhatsAppBot, text: str, trace: Optional[Trace] =
             trace.step("preview", "not found", f"waited {limit}s; sending anyway")
 
     if trace:
-        trace.step("preview", "grace wait", "0.6s")
-    time.sleep(0.6)
+        trace.step("preview", "grace wait", f"{app_settings.get_float('preview_grace_wait', 0.6):.1f}s")
+    if _sleep_with_cancel(bot, app_settings.get_float("preview_grace_wait", 0.6)):
+        return
 
     if not found_selector:
         # No preview appeared within the limit; wait a little longer rather
         # than dropping the card silently.
-        time.sleep(2)
+        if _sleep_with_cancel(bot, app_settings.get_float("preview_extra_wait", 2.0)):
+            return
 
 
 def _press_send(bot: WhatsAppBot, trace: Optional[Trace] = None) -> bool:
     page = bot.page
     bot.dismiss_popups(handle_welcome=False)
-    time.sleep(
-        app_settings.get_float("after_typing_wait", AFTER_TYPING_WAIT) + random.uniform(0, 1)
-    )
+    if _sleep_with_cancel(
+        bot,
+        app_settings.get_float("after_typing_wait", AFTER_TYPING_WAIT) + random.uniform(0, 1),
+    ):
+        return False
 
     if trace:
         trace.step("send", "pressing Enter")
@@ -1042,9 +1068,11 @@ def _press_send(bot: WhatsAppBot, trace: Optional[Trace] = None) -> bool:
         log("warning", f"could not press Enter to send: {exc}", "poster")
         return False
 
-    time.sleep(
-        app_settings.get_float("send_confirm_wait", SEND_CONFIRM_WAIT) + random.uniform(0, 2)
-    )
+    if _sleep_with_cancel(
+        bot,
+        app_settings.get_float("send_confirm_wait", SEND_CONFIRM_WAIT) + random.uniform(0, 2),
+    ):
+        return False
 
     # If the compose box still contains the text, Enter did not send it; use the
     # send button instead.
@@ -1063,7 +1091,8 @@ def _press_send(bot: WhatsAppBot, trace: Optional[Trace] = None) -> bool:
         if button:
             try:
                 button.click()
-                time.sleep(1.5)
+                if _sleep_with_cancel(bot, app_settings.get_float("send_fallback_wait", 1.5)):
+                    return False
                 if trace:
                     trace.step("send", "fallback", f"selector={button_selector} | clicked")
             except Exception as exc:

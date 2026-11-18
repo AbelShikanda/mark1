@@ -13,6 +13,10 @@ if not errorlevel 1 (
     exit /b 0
 )
 
+rem The server is not up: show a splash window that closes itself once
+rem /health answers, so the boot is visible instead of a silent delay.
+start "" powershell -NoProfile -STA -WindowStyle Hidden -File "%~dp0splash.ps1"
+
 rem A second click while the first launch is still building must not start a
 rem second build/server. Wait for the server that is already starting.
 if exist "%~dp0.launcher.lock" (

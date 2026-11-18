@@ -78,7 +78,7 @@ def batch_row(batch_id: int) -> dict:
     rows = db_logic.query("SELECT * FROM group_batches WHERE id = ?", (batch_id,))
     check(rows, f"batch {batch_id} not found")
     row = rows[0]
-    row["group_ids"] = main._batch_group_ids(batch_id)
+    row["group_ids"] = main._batch_member_ids("group", batch_id)
     return row
 
 

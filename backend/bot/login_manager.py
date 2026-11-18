@@ -265,7 +265,7 @@ class WhatsAppBot:
         log("info", f"[session] page loaded | url={getattr(self.page, 'url', url)}", "poster")
 
         self._wait_for_loading()
-        self._wait_for_login(LOGIN_TIMEOUT)
+        self._wait_for_login(app_settings.get_int("login_timeout_seconds", LOGIN_TIMEOUT))
 
     # ── headless / QR helpers ────────────────────────────────────────────
     def is_browser_closed(self) -> bool:
@@ -334,6 +334,29 @@ class WhatsAppBot:
             log("error", f"could not open a visible WhatsApp browser: {exc}", "whatsapp")
             return False
 
+    def relaunch_headed(self) -> bool:
+        """Stop the hidden browser and relaunch a visible one, reusing the session."""
+        try:
+            self.stop()
+        except Exception:
+            pass
+        self.headless = False
+        try:
+            self.start()
+            if self.page is not None:
+                try:
+                    self.page.goto(WHATSAPP_URL, wait_until="domcontentloaded", timeout=60000)
+                except Exception as exc:
+                    log("warning", f"visible browser could not load WhatsApp: {exc}", "whatsapp")
+                try:
+                    self._wait_for_loading(timeout=30)
+                except Exception:
+                    pass
+            return True
+        except Exception as exc:
+            log("error", f"could not relaunch WhatsApp headed: {exc}", "whatsapp")
+            return False
+
     def relaunch_headless(self) -> bool:
         """Stop the visible browser and relaunch hidden, reusing the session."""
         try:
@@ -365,7 +388,11 @@ class WhatsAppBot:
             high = app_settings.get_float("post_max_delay", POST_MAX_DELAY)
         if high < low:
             low, high = high, low
-        time.sleep(random.uniform(low, high))
+        # Keep Stop-run responsive: wait in short slices and bail early when a
+        # cancellation arrives instead of blocking for the full delay.
+        deadline = time.monotonic() + random.uniform(low, high)
+        while time.monotonic() < deadline and not self._cancelled():
+            time.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
 
     def is_logged_in(self) -> bool:
         return self.check_connection()
@@ -418,9 +445,14 @@ class WhatsAppBot:
         self._cancel_popups()
 
         # Loading: wait for the UI without reloading (reloads can loop forever).
+        # After a fresh link WhatsApp downloads the whole message store, which
+        # can take much longer than 90s; wait properly instead of falling
+        # through to "assume connected" and posting into an empty chat list.
         if self._loading():
-            update_connection_state("loading", "WhatsApp Web is loading")
-            deadline = time.time() + 90
+            sync_wait = max(30, app_settings.get_int("session_sync_wait", 600))
+            update_connection_state("loading", "WhatsApp is syncing your chats — this can take a while after linking")
+            deadline = time.time() + sync_wait
+            last_log = 0.0
             while time.time() < deadline:
                 if self._cancelled():
                     return False
@@ -432,11 +464,18 @@ class WhatsAppBot:
                 self._handle_error_popups()
                 if self._disconnected():
                     break
+                if time.time() - last_log > 15:
+                    last_log = time.time()
+                    log("info", "waiting for WhatsApp to finish syncing your chats", "whatsapp")
                 time.sleep(3)
             if self.check_connection():
                 self._failures = 0
                 update_connection_state("connected", "WhatsApp Web connected")
                 return True
+            if self._loading():
+                update_connection_state("loading", f"WhatsApp is still syncing your chats (waited {sync_wait}s)")
+                log("error", "WhatsApp chat sync did not finish in time; releasing the target instead of posting blind", "whatsapp")
+                return False
 
         if self._disconnected():
             if self._any_visible(DISCONNECT_SELECTORS):
@@ -576,10 +615,62 @@ class WhatsAppBot:
         update_connection_state("error", f"WhatsApp login timed out after {timeout}s")
         return False
 
+    def wait_for_pairing(self, timeout: Optional[int] = None) -> bool:
+        """Block until WhatsApp is paired in the (visible) browser.
+
+        Used for the "open the browser, scan the QR, close it again" pairing
+        flow. Returns True once connected, False on cancel, window close, or
+        timeout.
+        """
+        budget = int(timeout or app_settings.get_int("login_timeout_seconds", LOGIN_TIMEOUT))
+        deadline = time.time() + budget
+        announced_qr = False
+        while time.time() < deadline:
+            if self._cancelled():
+                log("info", "pairing wait cancelled", "whatsapp")
+                update_connection_state("stopped", "WhatsApp pairing cancelled")
+                return False
+            if self.is_browser_closed():
+                log("info", "pairing window closed before login completed", "whatsapp")
+                update_connection_state("stopped", "Pairing window closed before login completed")
+                return False
+            if self._connected():
+                self.is_connected = True
+                self._failures = 0
+                self._handle_welcome_popup()
+                log("info", "WhatsApp Web connected (pairing)", "whatsapp")
+                update_connection_state("connected", "WhatsApp Web connected")
+                return True
+
+            self._handle_error_popups()
+            self._cancel_popups(handle_welcome=False)
+
+            if self._disconnected():
+                update_connection_state(
+                    "waiting_qr",
+                    "Scan the QR in the opened browser window: WhatsApp > Linked devices > Link a device",
+                    qr_visible=True,
+                )
+                if not announced_qr:
+                    log(
+                        "info",
+                        "pairing browser opened; waiting for QR scan",
+                        "whatsapp",
+                    )
+                    announced_qr = True
+            else:
+                update_connection_state("waiting_login", "Waiting for WhatsApp Web login")
+            time.sleep(2)
+
+        log("error", f"WhatsApp pairing timed out after {budget}s", "whatsapp")
+        update_connection_state("error", f"WhatsApp pairing timed out after {budget}s")
+        return False
+
     def _recover(self, context: str) -> bool:
-        deadline = time.time() + CONNECTION_WAIT_TIMEOUT
+        budget = app_settings.get_int("connection_wait_seconds", CONNECTION_WAIT_TIMEOUT)
+        deadline = time.time() + budget
         attempt = 0
-        max_attempts = max(1, int(CONNECTION_WAIT_TIMEOUT // 8))
+        max_attempts = max(1, int(budget // 8))
         while time.time() < deadline:
             if self._cancelled():
                 return False

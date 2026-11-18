@@ -253,6 +253,36 @@ def clear_all_safe(*, vacuum: bool = True) -> Dict[str, Any]:
 # ── automatic retention ─────────────────────────────────────────────────
 
 
+def purge_old_messages() -> int:
+    """Delete raw captured group messages past the user-set retention.
+
+    Spam-flagged or human-reviewed rows are kept because they are training
+    material/value for the review queue; reports only ever hold aggregates, so
+    deleting raw rows never corrupts a saved report.
+    """
+    from bot import settings as app_settings  # local import to avoid a cycle
+
+    days = max(1, app_settings.get_int("message_retention_days", 30))
+    keep_flagged = app_settings.get_bool("keep_flagged_messages", True)
+    cutoff = _cutoff(days)
+    conn = get_conn()
+    if keep_flagged:
+        deleted = int(
+            conn.execute(
+                "DELETE FROM group_messages WHERE captured_at < ? AND spam_flag = 0 AND reviewed = 0",
+                (cutoff,),
+            ).rowcount
+            or 0
+        )
+    else:
+        deleted = int(
+            conn.execute("DELETE FROM group_messages WHERE captured_at < ?", (cutoff,)).rowcount or 0
+        )
+    conn.commit()
+    conn.close()
+    return deleted
+
+
 def retention_cleanup(days: int, *, vacuum: bool = False) -> Dict[str, Any]:
     """Delete logs, finished runs and debug files older than ``days``."""
     days = max(1, min(3650, int(days or 30)))
@@ -300,6 +330,9 @@ def retention_cleanup(days: int, *, vacuum: bool = False) -> Dict[str, Any]:
         )
     conn.commit()
     conn.close()
+    message_deleted = purge_old_messages()
+    if message_deleted:
+        log("info", f"retention purged {message_deleted} raw captured message(s)", "maintenance")
 
     debug_deleted = 0
     debug_bytes = 0

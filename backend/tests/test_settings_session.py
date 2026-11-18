@@ -49,7 +49,7 @@ def marker() -> Path:
 def main_test() -> None:
     # ── qr_after_logins default + clamping ─────────────────────────────
     values = app_settings.get_values()
-    check(values.get("qr_after_logins") == 1, f"default should be 1: {values.get('qr_after_logins')}")
+    check(values.get("qr_after_logins") == 5, f"default should be 5: {values.get('qr_after_logins')}")
 
     app_settings.update_settings({"qr_after_logins": 0})
     check(

@@ -49,7 +49,7 @@ export function TableToolbar({
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
       <input
-        className="w-full rounded border border-slate-300 bg-white p-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 sm:max-w-sm"
+        className="w-full rounded border border-slate-300 bg-white p-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none dark:border-[#2a2a2a] dark:bg-[#111] dark:text-[#f5f5f5] dark:placeholder:text-[#737373] sm:max-w-sm"
         placeholder={placeholder}
         value={search}
         onChange={(event) => onSearch(event.target.value)}
@@ -60,11 +60,11 @@ export function TableToolbar({
         type="button"
         onClick={onClear}
         disabled={!isFiltered}
-        className="rounded border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+        className="rounded border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-40 dark:border-[#2a2a2a] dark:text-[#e5e5e5] dark:hover:bg-[#161616]"
       >
         Clear filters
       </button>
-      <span className="text-xs text-slate-500 dark:text-slate-400">
+      <span className="text-xs text-slate-500 dark:text-[#a3a3a3]">
         Showing {count} of {total}
       </span>
     </div>
@@ -95,8 +95,8 @@ export default function DataTable<T>({
   return (
     <div className={`${TABLE_WRAP} ${maxHeight}`}>
       <table className={TABLE} style={minWidth ? { minWidth } : undefined}>
-        <thead className="bg-slate-100 dark:bg-slate-800">
-          <tr className="text-left text-xs uppercase tracking-wide text-slate-500 dark:text-slate-300">
+        <thead className="bg-slate-100 dark:bg-[#111]">
+          <tr className="text-left text-xs uppercase tracking-wide text-slate-500 dark:text-[#d4d4d4]">
             {columns.map((column) => (
               <th
                 key={column.key}
@@ -107,7 +107,7 @@ export default function DataTable<T>({
               </th>
             ))}
           </tr>
-          <tr className="bg-slate-50 dark:bg-slate-800/95">
+          <tr className="bg-slate-50 dark:bg-[#111]/95">
             {columns.map((column) => (
               <th key={column.key} className={FILTER_TH} scope="col">
                 {column.filter?.type === 'text' && (

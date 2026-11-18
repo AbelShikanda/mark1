@@ -3,6 +3,7 @@ import { api, getErrorMessage } from '../api';
 import ErrorBanner from '../components/ErrorBanner';
 import DataTable, { TableToolbar, type DataTableColumn } from '../components/DataTable';
 import { useTableFilters } from '../hooks/useTableFilters';
+import StatusBadge, { toneForStatus, RunStatusBadge } from '../components/StatusBadge';
 import { MUTED, NOTICE_INFO, PANEL, SUBTLE } from '../ui';
 
 type Connection = {
@@ -114,6 +115,16 @@ type SessionQr = {
   state: string | null;
 };
 
+type SessionStatus = {
+  session_exists: boolean;
+  connected: boolean;
+  ever_connected?: boolean;
+  headless?: boolean;
+  browser_open?: boolean;
+  state?: string | null;
+  qr_visible?: boolean;
+};
+
 type RemainingRow = {
   key: string;
   index: number;
@@ -133,8 +144,8 @@ const CONNECTION_STYLES: Record<string, string> = {
   waiting_qr: 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-200',
   disconnected: 'border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200',
   error: 'border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200',
-  stopped: 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300',
-  unknown: 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300',
+  stopped: 'border-slate-200 bg-slate-50 text-slate-700 dark:border-[#222] dark:bg-[#0a0a0a] dark:text-[#d4d4d4]',
+  unknown: 'border-slate-200 bg-slate-50 text-slate-700 dark:border-[#222] dark:bg-[#0a0a0a] dark:text-[#d4d4d4]',
 };
 
 const CONNECTION_DOT: Record<string, string> = {
@@ -150,32 +161,10 @@ const CONNECTION_DOT: Record<string, string> = {
   unknown: 'bg-slate-400',
 };
 
-const STATUS_STYLES: Record<string, string> = {
-  running: 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-200',
-  starting: 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-200',
-  waiting_batch: 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-200',
-  waiting_qr: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-950/60 dark:text-cyan-200',
-  waiting_login: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-950/60 dark:text-cyan-200',
-  reconnecting: 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-200',
-  completed: 'bg-green-100 text-green-700 dark:bg-green-950/60 dark:text-green-200',
-  stopped: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
-  failed: 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-200',
-  interrupted: 'bg-orange-100 text-orange-700 dark:bg-orange-950/60 dark:text-orange-200',
-};
-
-const TARGET_STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
-  current: 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-200',
-  sent: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-200',
-  failed: 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-200',
-  skipped: 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-200',
-  deferred: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
-};
-
 const LEVEL_STYLES: Record<string, string> = {
   error: 'text-red-700 dark:text-red-400',
   warning: 'text-amber-700 dark:text-amber-400',
-  info: 'text-slate-700 dark:text-slate-300',
+  info: 'text-slate-700 dark:text-[#d4d4d4]',
 };
 
 const TARGET_STATUS_LABELS: Record<string, string> = {
@@ -208,7 +197,32 @@ function sourceLabel(run: Run | null): string {
   return run.product?.name ?? (run.campaign_type === 'product_client' ? 'Waiting for product' : 'No product');
 }
 
+const DEFAULT_LIVE_POLL_MS = 2000;
+const DEFAULT_QR_POLL_MS = 3000;
+
 export default function LivePage({ initialCampaignId }: { initialCampaignId?: number | null }) {
+  const [livePollMs, setLivePollMs] = useState(DEFAULT_LIVE_POLL_MS);
+  const [qrPollMs, setQrPollMs] = useState(DEFAULT_QR_POLL_MS);
+  // Read the cadences from Settings once; clamp to the same bounds used there.
+  useEffect(() => {
+    let stopped = false;
+    api
+      .get<{ values: Record<string, number | string | boolean> }>('/settings')
+      .then((res) => {
+        const live = Number(res.data?.values?.live_poll_ms);
+        const qr = Number(res.data?.values?.qr_poll_ms);
+        if (stopped) return;
+        if (Number.isFinite(live)) setLivePollMs(Math.max(500, Math.min(60000, live)));
+        if (Number.isFinite(qr)) setQrPollMs(Math.max(500, Math.min(30000, qr)));
+      })
+      .catch(() => {
+        // Keep defaults.
+      });
+    return () => {
+      stopped = true;
+    };
+  }, []);
+
   const [active, setActive] = useState<ActiveResponse | null>(null);
   const [scopedRun, setScopedRun] = useState<Run | null>(null);
   const [targets, setTargets] = useState<RunTarget[]>([]);
@@ -221,6 +235,7 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
   const [refreshKey, setRefreshKey] = useState(0);
   const [qr, setQr] = useState<SessionQr | null>(null);
   const [qrBusy, setQrBusy] = useState(false);
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(null);
 
   const currentRunId = useRef<number | null>(null);
   const lastEventId = useRef(0);
@@ -297,18 +312,39 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
     };
 
     tick();
-    const timer = window.setInterval(tick, 2000);
+    const timer = window.setInterval(tick, livePollMs);
     return () => {
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [initialCampaignId, refreshKey]);
+  }, [initialCampaignId, refreshKey, livePollMs]);
 
   useEffect(() => {
     if (stickToBottom.current && feedRef.current) {
       feedRef.current.scrollTop = feedRef.current.scrollHeight;
     }
   }, [events]);
+
+  // Poll the saved-session status so we know whether this machine has ever
+  // paired WhatsApp. While headless is on and no session exists yet, the QR
+  // panel below stays permanently visible instead of only appearing mid-run.
+  useEffect(() => {
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const res = await api.get<SessionStatus>('/session/status');
+        if (!stopped) setSessionStatus(res.data);
+      } catch {
+        if (!stopped) setSessionStatus(null);
+      }
+    };
+    tick();
+    const timer = window.setInterval(tick, livePollMs);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [livePollMs, refreshKey]);
 
   const run = active?.run ?? scopedRun ?? active?.last_run ?? null;
   const isActive = Boolean(active?.active && active.run && run && active.run.id === run.id);
@@ -318,11 +354,16 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
       connection?.state === 'waiting_qr' ||
       connection?.state === 'waiting_login',
   );
+  // Headless + never paired: keep the pairing panel on screen permanently so
+  // the user does not have to hunt for it. Once WhatsApp has connected at
+  // least once (first successful scan), fall back to showing it only while a
+  // login is pending.
+  const showPairPanel = needsQr || Boolean(sessionStatus?.headless && !sessionStatus?.ever_connected);
 
-  // Fetch the QR snapshot only while WhatsApp is waiting for a scan. This keeps
-  // the polling loop cheap and lets the panel disappear on its own after login.
+  // Fetch the QR snapshot while the pairing panel is shown. This keeps the
+  // polling loop cheap and lets the image appear as soon as WhatsApp asks.
   useEffect(() => {
-    if (!needsQr) {
+    if (!showPairPanel) {
       setQr(null);
       return;
     }
@@ -341,12 +382,12 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
       }
     };
     tick();
-    const timer = window.setInterval(tick, 3000);
+    const timer = window.setInterval(tick, qrPollMs);
     return () => {
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [needsQr, refreshKey]);
+  }, [showPairPanel, refreshKey, qrPollMs]);
 
   const skipCurrent = async () => {
     if (!run) return;
@@ -403,6 +444,21 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
     try {
       const res = await api.post<{ message?: string }>('/session/use-headless');
       setNotice(res.data?.message ?? 'Switching WhatsApp to headless mode. Use “Show browser” if you need to scan.');
+      setRefreshKey((value) => value + 1);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setQrBusy(false);
+    }
+  };
+
+  const useHeaded = async () => {
+    setQrBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await api.post<{ message?: string }>('/session/use-headed');
+      setNotice(res.data?.message ?? 'Switching WhatsApp to a visible browser window.');
       setRefreshKey((value) => value + 1);
     } catch (err) {
       setError(getErrorMessage(err));
@@ -496,7 +552,7 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
     {
       key: 'index',
       header: '#',
-      cellClassName: 'text-xs text-slate-400 dark:text-slate-500',
+      cellClassName: 'text-xs text-slate-400 dark:text-[#737373]',
       cell: (row) => row.index,
     },
     {
@@ -504,7 +560,7 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
       header: 'Target',
       filter: { type: 'text', placeholder: 'Filter target' },
       cell: (row) => (
-        <span className={row.preview ? 'text-slate-500 dark:text-slate-400' : undefined}>
+        <span className={row.preview ? 'text-slate-500 dark:text-[#a3a3a3]' : undefined}>
           {row.name}
         </span>
       ),
@@ -513,7 +569,7 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
       key: 'batch',
       header: 'Batch',
       filter: { type: 'text', placeholder: 'Filter batch' },
-      cellClassName: 'text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-slate-500 dark:text-[#a3a3a3]',
       cell: (row) => row.batch ?? '—',
     },
     {
@@ -521,16 +577,16 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
       header: 'Status',
       filter: { type: 'select', placeholder: 'All statuses', options: TARGET_STATUS_OPTIONS },
       cell: (row) => (
-        <span className={`rounded px-2 py-0.5 text-xs ${row.preview ? 'bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-400' : TARGET_STATUS_STYLES[row.status] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+        <StatusBadge tone={row.preview ? 'neutral' : toneForStatus(row.status)}>
           {TARGET_STATUS_LABELS[row.status] ?? row.status}
-        </span>
+        </StatusBadge>
       ),
     },
     {
       key: 'source',
       header: 'Source',
       filter: { type: 'text', placeholder: 'Filter source' },
-      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-xs text-slate-500 dark:text-[#a3a3a3]',
       cell: (row) => row.source,
     },
   ];
@@ -546,7 +602,7 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
       key: 'batch',
       header: 'Batch',
       filter: { type: 'text', placeholder: 'Filter batch' },
-      cellClassName: 'text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-slate-500 dark:text-[#a3a3a3]',
       cell: (target) => target.batch_no ?? '—',
     },
     {
@@ -559,13 +615,13 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
     {
       key: 'attempts',
       header: 'Attempts',
-      cellClassName: 'text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-slate-500 dark:text-[#a3a3a3]',
       cell: (target) => target.attempts,
     },
     {
       key: 'finished',
       header: 'Finished',
-      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-xs text-slate-500 dark:text-[#a3a3a3]',
       cell: (target) => target.finished_at ?? '—',
     },
   ];
@@ -581,14 +637,14 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
       key: 'type',
       header: 'Type',
       filter: { type: 'text', placeholder: 'Filter type' },
-      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-xs text-slate-500 dark:text-[#a3a3a3]',
       cell: (target) => target.target_type,
     },
     {
       key: 'batch',
       header: 'Batch',
       filter: { type: 'text', placeholder: 'Filter batch' },
-      cellClassName: 'text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-slate-500 dark:text-[#a3a3a3]',
       cell: (target) => target.batch_no ?? '—',
     },
     {
@@ -596,22 +652,22 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
       header: 'Status',
       filter: { type: 'select', placeholder: 'All statuses', options: TARGET_STATUS_OPTIONS },
       cell: (target) => (
-        <span className={`rounded px-2 py-0.5 text-xs ${TARGET_STATUS_STYLES[target.status] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+        <StatusBadge tone={toneForStatus(target.status)}>
           {TARGET_STATUS_LABELS[target.status] ?? target.status}
-        </span>
+        </StatusBadge>
       ),
     },
     {
       key: 'attempts',
       header: 'Attempts',
-      cellClassName: 'text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-slate-500 dark:text-[#a3a3a3]',
       cell: (target) => target.attempts,
     },
     {
       key: 'message',
       header: 'Message',
       filter: { type: 'text', placeholder: 'Filter message' },
-      cellClassName: 'text-xs text-slate-500 dark:text-slate-400',
+      cellClassName: 'text-xs text-slate-500 dark:text-[#a3a3a3]',
       cell: (target) => target.message ?? '—',
     },
   ];
@@ -622,9 +678,9 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
         <h1 className="text-2xl font-bold">Live</h1>
         <div className="flex items-center gap-2">
           <span className={`text-xs ${MUTED}`}>
-            {isActive ? 'Polling every 2 seconds' : 'Showing the last run'}
+            {isActive ? `Polling every ${Math.max(1, Math.round(livePollMs / 1000))}s` : 'Showing the last run'}
           </span>
-          <button onClick={refresh} className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">
+          <button onClick={refresh} className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-[#2a2a2a] dark:text-[#e5e5e5] dark:hover:bg-[#161616]">
             Refresh
           </button>
         </div>
@@ -662,19 +718,21 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
           </div>
         </div>
         {(connection?.state === 'waiting_qr' || connection?.state === 'waiting_login') && (
-          <div className="mt-2 rounded border border-blue-200 bg-white/60 p-2 text-xs text-blue-800 dark:border-blue-900/60 dark:bg-slate-900/70 dark:text-blue-200">
+          <div className="mt-2 rounded border border-blue-200 bg-white/60 p-2 text-xs text-blue-800 dark:border-blue-900/60 dark:bg-[#161616] dark:text-blue-200">
             Open WhatsApp on your phone → Linked devices → Link a device, then scan the QR code below.
           </div>
         )}
       </div>
 
-      {needsQr && (
+      {showPairPanel && (
         <div className={`${PANEL} p-4`}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold">Pair this browser</h2>
               <p className={`mt-1 text-xs ${MUTED}`}>
-                Scan the code with WhatsApp. If the browser window is hidden, the QR below still works — or open the window.
+                {needsQr
+                  ? 'Scan the code with WhatsApp. If the browser window is hidden, the QR below still works — or open the window.'
+                  : 'Headless mode hides the Chrome window, and this WhatsApp profile has not been paired yet. Start any campaign run — a visible browser window will open automatically; scan the QR there and it closes itself.'}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -691,14 +749,23 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
                 <button
                   onClick={useHeadless}
                   disabled={qrBusy}
-                  className={`${ACTION_BTN} border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800`}
+                  className={`${ACTION_BTN} border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-[#2a2a2a] dark:text-[#e5e5e5] dark:hover:bg-[#161616]`}
                 >
                   Switch to headless
                 </button>
               )}
+              {(qr?.headless ?? sessionStatus?.headless) === true && (
+                <button
+                  onClick={useHeaded}
+                  disabled={qrBusy}
+                  className={`${ACTION_BTN} border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-[#2a2a2a] dark:text-[#e5e5e5] dark:hover:bg-[#161616]`}
+                >
+                  Switch to headed
+                </button>
+              )}
               <button
                 onClick={refresh}
-                className={`${ACTION_BTN} border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800`}
+                className={`${ACTION_BTN} border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-[#2a2a2a] dark:text-[#e5e5e5] dark:hover:bg-[#161616]`}
               >
                 Refresh QR
               </button>
@@ -709,15 +776,15 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
               <img
                 src={qr.qr_data_url}
                 alt="WhatsApp login QR code"
-                className="h-56 w-56 rounded border border-slate-200 bg-white p-2 dark:border-slate-700"
+                className="h-56 w-56 rounded border border-slate-200 bg-white p-2 dark:border-[#222]"
               />
             ) : (
-              <div className="flex h-56 w-56 items-center justify-center rounded border border-dashed border-slate-300 p-3 text-center text-xs text-slate-500 dark:border-slate-600 dark:text-slate-400">
+              <div className="flex h-56 w-56 items-center justify-center rounded border border-dashed border-slate-300 p-3 text-center text-xs text-slate-500 dark:border-[#2a2a2a] dark:text-[#a3a3a3]">
                 {qr?.message ?? 'Waiting for the QR code…'}
               </div>
             )}
             <div className={`text-xs ${MUTED}`}>
-              <p className="font-medium text-slate-700 dark:text-slate-200">Can’t scan?</p>
+              <p className="font-medium text-slate-700 dark:text-[#e5e5e5]">Can’t scan?</p>
               <p className="mt-1">Show the browser window, or reload it from the Settings page. The QR refreshes every few seconds.</p>
               {qr && (
                 <p className="mt-2">
@@ -741,10 +808,8 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-lg font-semibold">{run.campaign_name ?? `Campaign ${run.campaign_id}`}</h2>
-                  <span className={`rounded px-2 py-0.5 text-xs ${STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
-                    {run.status}
-                  </span>
-                  <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{run.phase}</span>
+                  <RunStatusBadge status={run.status} />
+                  <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-[#111] dark:text-[#d4d4d4]">{run.phase}</span>
                   {run.skip_requested && (
                     <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-950/60 dark:text-amber-200">Skip requested</span>
                   )}
@@ -778,7 +843,7 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
                 <span>Progress</span>
                 <span>{progressProcessed} / {progressTotal} ({progressPercent}%)</span>
               </div>
-              <div className="h-2 w-full overflow-hidden rounded bg-slate-100 dark:bg-slate-800">
+              <div className="h-2 w-full overflow-hidden rounded bg-slate-100 dark:bg-[#111]">
                 <div className="h-full bg-indigo-500 transition-all dark:bg-indigo-400" style={{ width: `${progressPercent}%` }} />
               </div>
             </div>
@@ -795,13 +860,13 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
                     {run.current_target.type} #{run.current_target.id} · attempt {run.current_target.attempts || 1}
                   </div>
                   <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                    <span className={`rounded px-2 py-0.5 ${TARGET_STATUS_STYLES[run.current_target.status] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+                    <StatusBadge tone={toneForStatus(run.current_target.status)}>
                       {TARGET_STATUS_LABELS[run.current_target.status] ?? run.current_target.status}
-                    </span>
-                    <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                    </StatusBadge>
+                    <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-600 dark:bg-[#111] dark:text-[#d4d4d4]">
                       daily {run.current_target.daily_count ?? 0} / {run.current_target.daily_cap ?? '—'}
                     </span>
-                    <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                    <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-600 dark:bg-[#111] dark:text-[#d4d4d4]">
                       misses {run.current_target.failures ?? 0} consecutive · {run.current_target.total_misses ?? 0} total
                     </span>
                     {run.current_target.is_silenced && (
@@ -850,7 +915,7 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
           </div>
 
           {/* Tabs */}
-          <div className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-[#222]">
             {[
               ['remaining', `Remaining (${remainingRows.length + previewRows.length})`],
               ['missed', `Missed (${missed.length})`],
@@ -863,7 +928,7 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
                 className={`rounded-t border-b-2 px-4 py-2 text-sm font-medium ${
                   tab === key
                     ? 'border-indigo-600 text-indigo-700 dark:border-indigo-400 dark:text-indigo-300'
-                    : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100'
+                    : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-[#a3a3a3] dark:hover:text-slate-100'
                 }`}
               >
                 {label}
@@ -946,7 +1011,7 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
                 if (!element) return;
                 stickToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
               }}
-              className="max-h-[55vh] overflow-auto rounded-lg border border-slate-200 bg-slate-900 p-3 font-mono text-xs dark:border-slate-700"
+              className="max-h-[55vh] overflow-auto rounded-lg border border-slate-200 bg-slate-900 p-3 font-mono text-xs dark:border-[#222]"
             >
               {events.length === 0 && <div className="text-slate-500">No live events yet.</div>}
               {events.map((event) => (

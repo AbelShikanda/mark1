@@ -27,3 +27,5 @@ backend.log
 # of git.
 backend/adopt/*
 !backend/adopt/target_groups.py
+backend-restart.log
+backend-restart.err.log
