@@ -76,11 +76,11 @@
 
 ### High
 - [x] Feedback page: in-app suggestion box for bugs/improvements � type, title, description, steps to reproduce, expected/actual, screenshot upload to uploads/, stored in a `feedback` table; dashboard page; one-click "copy as markdown issue" export (environment, steps, evidence) ready to paste to an agent
-- [ ] Message capture during campaign runs (opt-in per campaign): per-campaign `capture_replies` toggle + `capture_dwell_seconds` per group with a global default in Settings (default 0 / disabled); capture only after a confirmed-sent post; DOM scrape after the dwell; raw rows stored in a `group_messages` table linked to campaign_posts/run_id; capture failures can never fail the post/campaign
-- [ ] Retention: Settings field `message_retention_days` (default e.g. 30) auto-purges raw captured messages; generated reports/conclusions are retained until manually removed
-- [ ] Reports: define what a report contains (candidate: saved analysis snapshot � intent/sentiment summary, top questions, leaderboards, best time) and add on-demand generation + retained-list UI; confirm definition with user first
-- [ ] Message classification (local, offline): intent/topic/sentiment via keyword rules in English/Swahili/Sheng; stored per captured message; feeds the reports
-- [ ] Analytics on captured data: best posting time, group leaderboard, post leaderboard (depends on capture + classification)
+- [x] Message capture during campaign runs (opt-in per campaign): per-campaign `capture_replies` toggle + `capture_dwell_seconds` per group with a global default in Settings (default 0 / disabled); capture only after a confirmed-sent post; DOM scrape after the dwell; raw rows stored in a `group_messages` table linked to campaign_posts/run_id; capture failures can never fail the post/campaign
+- [x] Retention: Settings field `message_retention_days` (default e.g. 30) auto-purges raw captured messages; generated reports/conclusions are retained until manually removed
+- [x] Reports: define what a report contains (candidate: saved analysis snapshot � intent/sentiment summary, top questions, leaderboards, best time) and add on-demand generation + retained-list UI; confirm definition with user first
+- [x] Message classification (local, offline): intent/topic/sentiment via keyword rules in English/Swahili/Sheng; stored per captured message; feeds the reports
+- [x] Analytics on captured data: best posting time, group leaderboard, post leaderboard (depends on capture + classification)
 - [ ] Deferred (not scheduled): per-link click tracking � needs an external redirector (e.g. self-hosted Cloudflare Worker, free tier); revisit when analytics core lands
 
 ## Phase 10 - Kali / Linux support
