@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, getErrorMessage } from '../api';
 import ErrorBanner from '../components/ErrorBanner';
 import PageHeader from '../components/PageHeader';
@@ -118,6 +118,15 @@ export default function FeedbackPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+  // Done items collapse by default; user can still expand them.
+  const collapsedInitRef = useRef(false);
+  useEffect(() => {
+    if (collapsedInitRef.current) return;
+    if (entries.length === 0) return;
+    setCollapsed(new Set(entries.filter((entry) => entry.status === 'done').map((entry) => entry.id)));
+    collapsedInitRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries]);
 
   const load = async () => {
     setLoading(true);
@@ -246,9 +255,12 @@ export default function FeedbackPage() {
             : item,
         ),
       );
-      if (status === 'done') {
-        setCollapsed((prev) => new Set(prev).add(entry.id));
-      }
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        if (status === 'done') next.add(entry.id);
+        else next.delete(entry.id);
+        return next;
+      });
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
