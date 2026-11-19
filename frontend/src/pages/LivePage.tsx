@@ -357,8 +357,10 @@ export default function LivePage({ initialCampaignId }: { initialCampaignId?: nu
   // Headless + never paired: keep the pairing panel on screen permanently so
   // the user does not have to hunt for it. Once WhatsApp has connected at
   // least once (first successful scan), fall back to showing it only while a
-  // login is pending.
-  const showPairPanel = needsQr || Boolean(sessionStatus?.headless && !sessionStatus?.ever_connected);
+  // login is pending. In headed mode there is no hidden window, so the panel
+  // is pointless (the QR is visible in the real browser) — suppress it.
+  const pairable = Boolean(sessionStatus?.headless ?? false);
+  const showPairPanel = pairable && (needsQr || !sessionStatus?.ever_connected);
 
   // Fetch the QR snapshot while the pairing panel is shown. This keeps the
   // polling loop cheap and lets the image appear as soon as WhatsApp asks.
